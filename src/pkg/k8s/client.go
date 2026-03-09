@@ -1223,10 +1223,6 @@ func (c *Client) GetClusterHealth(ctx context.Context, includeMetrics, includeEv
 
 // GetResourceQuotas lists resource quotas and usage
 func (c *Client) GetResourceQuotas(ctx context.Context, namespace string, showPercentage bool) (map[string]interface{}, error) {
-	result := map[string]interface{}{
-		"quotas": []map[string]interface{}{},
-	}
-
 	var quotas *corev1.ResourceQuotaList
 	var err error
 
@@ -1240,15 +1236,11 @@ func (c *Client) GetResourceQuotas(ctx context.Context, namespace string, showPe
 		return nil, fmt.Errorf("failed to list resource quotas: %w", err)
 	}
 
+	quotasList := make([]map[string]interface{}, 0, len(quotas.Items))
 	for i := range quotas.Items {
 		quota := &quotas.Items[i]
-		quotaInfo := map[string]interface{}{
-			"name":      quota.Name,
-			"namespace": quota.Namespace,
-			"status":    map[string]interface{}{},
-		}
+		statusMap := map[string]interface{}{}
 
-		// Process each resource in the quota
 		for resourceName, hard := range quota.Status.Hard {
 			used := quota.Status.Used[resourceName]
 
@@ -1266,21 +1258,23 @@ func (c *Client) GetResourceQuotas(ctx context.Context, namespace string, showPe
 				}
 			}
 
-			quotaInfo["status"].(map[string]interface{})[string(resourceName)] = resourceStatus
+			statusMap[string(resourceName)] = resourceStatus
 		}
 
-		result["quotas"] = append(result["quotas"].([]map[string]interface{}), quotaInfo)
+		quotasList = append(quotasList, map[string]interface{}{
+			"name":      quota.Name,
+			"namespace": quota.Namespace,
+			"status":    statusMap,
+		})
 	}
 
-	return result, nil
+	return map[string]interface{}{
+		"quotas": quotasList,
+	}, nil
 }
 
 // GetLimitRanges gets limit ranges in namespaces
 func (c *Client) GetLimitRanges(ctx context.Context, namespace string) (map[string]interface{}, error) {
-	result := map[string]interface{}{
-		"limitRanges": []map[string]interface{}{},
-	}
-
 	var limitRanges *corev1.LimitRangeList
 	var err error
 
@@ -1294,13 +1288,10 @@ func (c *Client) GetLimitRanges(ctx context.Context, namespace string) (map[stri
 		return nil, fmt.Errorf("failed to list limit ranges: %w", err)
 	}
 
+	lrList := make([]map[string]interface{}, 0, len(limitRanges.Items))
 	for i := range limitRanges.Items {
 		lr := &limitRanges.Items[i]
-		lrInfo := map[string]interface{}{
-			"name":      lr.Name,
-			"namespace": lr.Namespace,
-			"limits":    []map[string]interface{}{},
-		}
+		limits := make([]map[string]interface{}, 0, len(lr.Spec.Limits))
 
 		for _, limit := range lr.Spec.Limits {
 			limitInfo := map[string]interface{}{
@@ -1320,13 +1311,19 @@ func (c *Client) GetLimitRanges(ctx context.Context, namespace string) (map[stri
 				limitInfo["defaultRequest"] = limit.DefaultRequest
 			}
 
-			lrInfo["limits"] = append(lrInfo["limits"].([]map[string]interface{}), limitInfo)
+			limits = append(limits, limitInfo)
 		}
 
-		result["limitRanges"] = append(result["limitRanges"].([]map[string]interface{}), lrInfo)
+		lrList = append(lrList, map[string]interface{}{
+			"name":      lr.Name,
+			"namespace": lr.Namespace,
+			"limits":    limits,
+		})
 	}
 
-	return result, nil
+	return map[string]interface{}{
+		"limitRanges": lrList,
+	}, nil
 }
 
 // GetTopPods gets top pods by resource usage
@@ -1571,8 +1568,9 @@ func (c *Client) GetPodDebugInfo(ctx context.Context, name, namespace string, in
 	}
 
 	// Pod conditions
+	conditions := make([]map[string]interface{}, 0, len(pod.Status.Conditions))
 	for _, condition := range pod.Status.Conditions {
-		result["conditions"] = append(result["conditions"].([]map[string]interface{}), map[string]interface{}{
+		conditions = append(conditions, map[string]interface{}{
 			"type":               string(condition.Type),
 			"status":             string(condition.Status),
 			"reason":             condition.Reason,
@@ -1580,8 +1578,10 @@ func (c *Client) GetPodDebugInfo(ctx context.Context, name, namespace string, in
 			"lastTransitionTime": condition.LastTransitionTime.Time,
 		})
 	}
+	result["conditions"] = conditions
 
 	// Container statuses
+	containersList := make([]map[string]interface{}, 0, len(pod.Status.ContainerStatuses))
 	for i := range pod.Status.ContainerStatuses {
 		cs := &pod.Status.ContainerStatuses[i]
 		containerInfo := map[string]interface{}{
@@ -1607,8 +1607,9 @@ func (c *Client) GetPodDebugInfo(ctx context.Context, name, namespace string, in
 			containerInfo["message"] = cs.State.Terminated.Message
 		}
 
-		result["containers"] = append(result["containers"].([]map[string]interface{}), containerInfo)
+		containersList = append(containersList, containerInfo)
 	}
+	result["containers"] = containersList
 
 	// Get events related to this pod
 	fieldSelector := fmt.Sprintf("involvedObject.name=%s,involvedObject.namespace=%s", name, namespace)
@@ -1616,9 +1617,10 @@ func (c *Client) GetPodDebugInfo(ctx context.Context, name, namespace string, in
 		FieldSelector: fieldSelector,
 	})
 	if err == nil {
+		eventsList := make([]map[string]interface{}, 0, len(events.Items))
 		for i := range events.Items {
 			event := &events.Items[i]
-			result["events"] = append(result["events"].([]map[string]interface{}), map[string]interface{}{
+			eventsList = append(eventsList, map[string]interface{}{
 				"type":      event.Type,
 				"reason":    event.Reason,
 				"message":   event.Message,
@@ -1627,6 +1629,7 @@ func (c *Client) GetPodDebugInfo(ctx context.Context, name, namespace string, in
 				"lastTime":  event.LastTimestamp.Time,
 			})
 		}
+		result["events"] = eventsList
 	}
 
 	if includeLogs {
@@ -1685,6 +1688,7 @@ func (c *Client) GetServiceEndpoints(ctx context.Context, name, namespace string
 	}
 
 	// Process endpoint subsets
+	endpointsList := []map[string]interface{}{}
 	for _, subset := range endpoints.Subsets {
 		for _, addr := range subset.Addresses {
 			endpointInfo := map[string]interface{}{
@@ -1727,7 +1731,7 @@ func (c *Client) GetServiceEndpoints(ctx context.Context, name, namespace string
 			}
 			endpointInfo["ports"] = ports
 
-			result["endpoints"] = append(result["endpoints"].([]map[string]interface{}), endpointInfo)
+			endpointsList = append(endpointsList, endpointInfo)
 		}
 
 		// Also include not ready addresses
@@ -1744,19 +1748,16 @@ func (c *Client) GetServiceEndpoints(ctx context.Context, name, namespace string
 				endpointInfo["targetNamespace"] = addr.TargetRef.Namespace
 			}
 
-			result["endpoints"] = append(result["endpoints"].([]map[string]interface{}), endpointInfo)
+			endpointsList = append(endpointsList, endpointInfo)
 		}
 	}
+	result["endpoints"] = endpointsList
 
 	return result, nil
 }
 
 // GetNetworkPolicies lists network policies affecting a namespace or pod
 func (c *Client) GetNetworkPolicies(ctx context.Context, namespace, podName string, includeDetails bool) (map[string]interface{}, error) {
-	result := map[string]interface{}{
-		"policies": []map[string]interface{}{},
-	}
-
 	// Get all network policies in the namespace
 	policies, err := c.clientset.NetworkingV1().NetworkPolicies(namespace).List(ctx, metav1.ListOptions{})
 	if err != nil {
@@ -1773,6 +1774,7 @@ func (c *Client) GetNetworkPolicies(ctx context.Context, namespace, podName stri
 		podLabels = pod.Labels
 	}
 
+	policiesList := make([]map[string]interface{}, 0, len(policies.Items))
 	for i := range policies.Items {
 		policy := &policies.Items[i]
 		policyInfo := map[string]interface{}{
@@ -1806,10 +1808,12 @@ func (c *Client) GetNetworkPolicies(ctx context.Context, namespace, podName stri
 			policyInfo["podSelector"] = policy.Spec.PodSelector.MatchLabels
 		}
 
-		result["policies"] = append(result["policies"].([]map[string]interface{}), policyInfo)
+		policiesList = append(policiesList, policyInfo)
 	}
 
-	return result, nil
+	return map[string]interface{}{
+		"policies": policiesList,
+	}, nil
 }
 
 // GetSecurityContext gets security contexts for a pod
@@ -1961,8 +1965,8 @@ func (c *Client) GetResourceHistory(ctx context.Context, kind, name, namespace s
 	}
 
 	sort.Slice(relevantEvents, func(i, j int) bool {
-		t1 := relevantEvents[i]["lastTimestamp"].(time.Time)
-		t2 := relevantEvents[j]["lastTimestamp"].(time.Time)
+		t1, _ := relevantEvents[i]["lastTimestamp"].(time.Time)
+		t2, _ := relevantEvents[j]["lastTimestamp"].(time.Time)
 		return t2.Before(t1)
 	})
 
@@ -1983,10 +1987,13 @@ func (c *Client) GetResourceHistory(ctx context.Context, kind, name, namespace s
 
 // ValidateManifest validates a YAML or JSON manifest without applying it
 func (c *Client) ValidateManifest(ctx context.Context, manifest, format string, strict bool) (map[string]interface{}, error) {
+	errs := []string{}
+	warns := []string{}
+
 	result := map[string]interface{}{
 		"valid":    false,
-		"errors":   []string{},
-		"warnings": []string{},
+		"errors":   errs,
+		"warnings": warns,
 		"resource": nil,
 	}
 
@@ -2010,20 +2017,23 @@ func (c *Client) ValidateManifest(ctx context.Context, manifest, format string, 
 	}
 
 	if err != nil {
-		result["errors"] = append(result["errors"].([]string), fmt.Sprintf("Failed to parse %s: %v", format, err))
+		errs = append(errs, fmt.Sprintf("Failed to parse %s: %v", format, err))
+		result["errors"] = errs
 		return result, nil
 	}
 
 	// Extract resource info
 	metadata, ok := obj["metadata"].(map[string]interface{})
 	if !ok {
-		result["errors"] = append(result["errors"].([]string), "Missing metadata field")
+		errs = append(errs, "Missing metadata field")
+		result["errors"] = errs
 		return result, nil
 	}
 
 	kind, ok := obj["kind"].(string)
 	if !ok {
-		result["errors"] = append(result["errors"].([]string), "Missing or invalid kind field")
+		errs = append(errs, "Missing or invalid kind field")
+		result["errors"] = errs
 		return result, nil
 	}
 
@@ -2039,11 +2049,11 @@ func (c *Client) ValidateManifest(ctx context.Context, manifest, format string, 
 
 	// Basic validation checks
 	if name == "" {
-		result["errors"] = append(result["errors"].([]string), "Resource name is required in metadata")
+		errs = append(errs, "Resource name is required in metadata")
 	}
 
 	if obj["apiVersion"] == nil {
-		result["errors"] = append(result["errors"].([]string), "apiVersion is required")
+		errs = append(errs, "apiVersion is required")
 	}
 
 	// Try to create an unstructured object for more validation
@@ -2052,7 +2062,7 @@ func (c *Client) ValidateManifest(ctx context.Context, manifest, format string, 
 	// Get the GVR for this resource type
 	gvr, err := c.getCachedGVR(kind)
 	if err != nil {
-		result["warnings"] = append(result["warnings"].([]string), fmt.Sprintf("Unknown resource type '%s': %v", kind, err))
+		warns = append(warns, fmt.Sprintf("Unknown resource type '%s': %v", kind, err))
 	} else {
 		// Perform a dry-run create to validate
 		var dryRunErr error
@@ -2067,17 +2077,18 @@ func (c *Client) ValidateManifest(ctx context.Context, manifest, format string, 
 		}
 
 		if dryRunErr != nil {
-			// Check if it's because the resource already exists (which is okay for validation)
 			if errors.IsAlreadyExists(dryRunErr) {
-				result["warnings"] = append(result["warnings"].([]string), "Resource already exists (would update instead of create)")
+				warns = append(warns, "Resource already exists (would update instead of create)")
 			} else {
-				result["errors"] = append(result["errors"].([]string), fmt.Sprintf("Validation failed: %v", dryRunErr))
+				errs = append(errs, fmt.Sprintf("Validation failed: %v", dryRunErr))
 			}
 		}
 	}
 
-	// If no errors, it's valid
-	if len(result["errors"].([]string)) == 0 {
+	result["errors"] = errs
+	result["warnings"] = warns
+
+	if len(errs) == 0 {
 		result["valid"] = true
 	}
 
