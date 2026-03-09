@@ -1095,36 +1095,35 @@ func (c *Client) GetClusterHealth(ctx context.Context, includeMetrics, includeEv
 			result["issues"] = append(issuesList, fmt.Sprintf("Failed to list nodes: %v", err))
 		}
 	} else {
-		nodeStatus := map[string]interface{}{
-			"total":    len(nodes.Items),
-			"ready":    0,
-			"notReady": 0,
-			"nodes":    []map[string]interface{}{},
-		}
+		readyCount := 0
+		notReadyCount := 0
+		nodesList := make([]map[string]interface{}, 0, len(nodes.Items))
 
 		for i := range nodes.Items {
 			node := &nodes.Items[i]
+			nodeConditions := []string{}
 			nodeInfo := map[string]interface{}{
-				"name":       node.Name,
-				"ready":      false,
-				"conditions": []string{},
+				"name":  node.Name,
+				"ready": false,
 			}
 
 			for _, condition := range node.Status.Conditions {
 				if condition.Type == corev1.NodeReady {
 					if condition.Status == corev1.ConditionTrue {
 						nodeInfo["ready"] = true
-						nodeStatus["ready"] = nodeStatus["ready"].(int) + 1
+						readyCount++
 					} else {
-						nodeStatus["notReady"] = nodeStatus["notReady"].(int) + 1
+						notReadyCount++
 						result["healthy"] = false
 					}
 				}
 				if condition.Status != corev1.ConditionTrue && condition.Type != corev1.NodeReady {
-					nodeInfo["conditions"] = append(nodeInfo["conditions"].([]string),
+					nodeConditions = append(nodeConditions,
 						fmt.Sprintf("%s: %s", condition.Type, condition.Message))
 				}
 			}
+
+			nodeInfo["conditions"] = nodeConditions
 
 			// Get node metrics if requested
 			if includeMetrics {
@@ -1134,10 +1133,15 @@ func (c *Client) GetClusterHealth(ctx context.Context, includeMetrics, includeEv
 				}
 			}
 
-			nodeStatus["nodes"] = append(nodeStatus["nodes"].([]map[string]interface{}), nodeInfo)
+			nodesList = append(nodesList, nodeInfo)
 		}
 
-		result["nodes"] = nodeStatus
+		result["nodes"] = map[string]interface{}{
+			"total":    len(nodes.Items),
+			"ready":    readyCount,
+			"notReady": notReadyCount,
+			"nodes":    nodesList,
+		}
 	}
 
 	// Check control plane components
@@ -1149,9 +1153,7 @@ func (c *Client) GetClusterHealth(ctx context.Context, includeMetrics, includeEv
 		"component=etcd",
 	}
 
-	cpStatus := map[string]interface{}{
-		"components": []map[string]interface{}{},
-	}
+	cpComponents := []map[string]interface{}{}
 
 	for _, ns := range controlPlaneNamespaces {
 		for _, label := range controlPlaneLabels {
@@ -1177,13 +1179,15 @@ func (c *Client) GetClusterHealth(ctx context.Context, includeMetrics, includeEv
 						}
 					}
 
-					cpStatus["components"] = append(cpStatus["components"].([]map[string]interface{}), component)
+					cpComponents = append(cpComponents, component)
 				}
 			}
 		}
 	}
 
-	result["controlPlane"] = cpStatus
+	result["controlPlane"] = map[string]interface{}{
+		"components": cpComponents,
+	}
 
 	// Get recent warning/error events if requested
 	if includeEvents {
