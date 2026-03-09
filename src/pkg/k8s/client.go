@@ -145,7 +145,8 @@ func (c *Client) GetAPIResources(ctx context.Context, includeNamespaceScoped, in
 
 	var resources []map[string]interface{}
 	for _, resourceList := range resourceLists {
-		for _, resource := range resourceList.APIResources {
+		for i := range resourceList.APIResources {
+			resource := &resourceList.APIResources[i]
 			if (resource.Namespaced && !includeNamespaceScoped) || (!resource.Namespaced && !includeClusterScoped) {
 				continue
 			}
@@ -406,7 +407,8 @@ func (c *Client) getCachedGVR(kind string) (*schema.GroupVersionResource, error)
 		if err != nil {
 			continue
 		}
-		for _, resource := range resourceList.APIResources {
+		for i := range resourceList.APIResources {
+			resource := &resourceList.APIResources[i]
 			gvr := &schema.GroupVersionResource{
 				Group:    gv.Group,
 				Version:  gv.Version,
@@ -423,7 +425,7 @@ func (c *Client) getCachedGVR(kind string) (*schema.GroupVersionResource, error)
 
 			if resource.Kind == kind || resource.Name == kind ||
 				resource.SingularName == kind ||
-				strings.ToLower(resource.Kind) == kindLower ||
+				strings.EqualFold(resource.Kind, kindLower) ||
 				resource.Name == kindLower {
 				result = gvr
 			}
@@ -485,7 +487,8 @@ func (c *Client) DescribeResource(ctx context.Context, kind, name, namespace str
 		})
 		if err == nil && len(events.Items) > 0 {
 			eventList := make([]map[string]interface{}, 0, len(events.Items))
-			for _, e := range events.Items {
+			for i := range events.Items {
+				e := &events.Items[i]
 				eventList = append(eventList, map[string]interface{}{
 					"type":     e.Type,
 					"reason":   e.Reason,
@@ -559,7 +562,8 @@ func (c *Client) GetPodsLogs(ctx context.Context, namespace, containerName, podN
 
 	// If the pod has multiple containers, get logs from each container
 	var allLogs strings.Builder
-	for _, container := range pod.Spec.Containers {
+	for i := range pod.Spec.Containers {
+		container := &pod.Spec.Containers[i]
 		containerLogOptions := podLogOptions.DeepCopy()
 		containerLogOptions.Container = container.Name
 
@@ -656,7 +660,8 @@ func (c *Client) GetEvents(ctx context.Context, namespace, labelSelector string)
 	}
 
 	var events []map[string]interface{}
-	for _, event := range eventList.Items {
+	for i := range eventList.Items {
+		event := &eventList.Items[i]
 		events = append(events, map[string]interface{}{
 			"name":      event.Name,
 			"namespace": event.Namespace,
@@ -682,7 +687,8 @@ func (c *Client) GetIngresses(ctx context.Context, host string) ([]map[string]in
 	}
 
 	var ingressList []map[string]interface{}
-	for _, ingress := range ingresses.Items {
+	for i := range ingresses.Items {
+		ingress := &ingresses.Items[i]
 		// Check if this ingress has any rules matching the given host
 		hasMatchingHost := false
 		var matchingPaths []string
@@ -737,7 +743,7 @@ func (c *Client) RolloutRestart(ctx context.Context, kind, name, namespace strin
 	resource := c.dynamicClient.Resource(*gvr).Namespace(namespace)
 
 	patch := []byte(fmt.Sprintf(
-		`{"spec":{"template":{"metadata":{"annotations":{"kubectl.kubernetes.io/restartedAt":"%s"}}}}}`,
+		`{"spec":{"template":{"metadata":{"annotations":{"kubectl.kubernetes.io/restartedAt":%q}}}}}`,
 		time.Now().Format(time.RFC3339),
 	))
 
@@ -816,9 +822,10 @@ func (c *Client) GetResourceDiff(ctx context.Context, kind, name, namespace, com
 
 // GetNamespaceResources lists all resources in a namespace
 func (c *Client) GetNamespaceResources(ctx context.Context, namespace string, types string, includeSecrets bool) (map[string]interface{}, error) {
+	resourcesMap := make(map[string][]map[string]interface{})
 	result := map[string]interface{}{
 		"namespace": namespace,
-		"resources": make(map[string][]map[string]interface{}),
+		"resources": resourcesMap,
 	}
 
 	// Get all available resource types
@@ -843,14 +850,15 @@ func (c *Client) GetNamespaceResources(ctx context.Context, namespace string, ty
 			continue
 		}
 
-		for _, resource := range resourceList.APIResources {
+		for i := range resourceList.APIResources {
+			resource := &resourceList.APIResources[i]
 			// Skip if not namespaced
 			if !resource.Namespaced {
 				continue
 			}
 
 			// Skip secrets if not requested
-			if !includeSecrets && strings.ToLower(resource.Kind) == "secret" {
+			if !includeSecrets && strings.EqualFold(resource.Kind, "secret") {
 				continue
 			}
 
@@ -892,7 +900,7 @@ func (c *Client) GetNamespaceResources(ctx context.Context, namespace string, ty
 
 					resources = append(resources, summary)
 				}
-				result["resources"].(map[string][]map[string]interface{})[resource.Kind] = resources
+				resourcesMap[resource.Kind] = resources
 			}
 		}
 	}
@@ -972,18 +980,15 @@ func (c *Client) GetResourceOwners(ctx context.Context, kind, name, namespace st
 
 // Helper function to generate simple diff
 func generateSimpleDiff(obj1, obj2 map[string]interface{}) map[string]interface{} {
-	diff := map[string]interface{}{
-		"added":    map[string]interface{}{},
-		"removed":  map[string]interface{}{},
-		"modified": map[string]interface{}{},
-	}
+	added := map[string]interface{}{}
+	removed := map[string]interface{}{}
+	modified := map[string]interface{}{}
 
-	// Simple comparison - this could be enhanced with a proper diff library
 	for k, v1 := range obj1 {
 		if v2, exists := obj2[k]; !exists {
-			diff["removed"].(map[string]interface{})[k] = v1
+			removed[k] = v1
 		} else if fmt.Sprintf("%v", v1) != fmt.Sprintf("%v", v2) {
-			diff["modified"].(map[string]interface{})[k] = map[string]interface{}{
+			modified[k] = map[string]interface{}{
 				"old": v1,
 				"new": v2,
 			}
@@ -992,11 +997,15 @@ func generateSimpleDiff(obj1, obj2 map[string]interface{}) map[string]interface{
 
 	for k, v2 := range obj2 {
 		if _, exists := obj1[k]; !exists {
-			diff["added"].(map[string]interface{})[k] = v2
+			added[k] = v2
 		}
 	}
 
-	return diff
+	return map[string]interface{}{
+		"added":    added,
+		"removed":  removed,
+		"modified": modified,
+	}
 }
 
 // Helper function to find resources owned by a specific UID
@@ -1015,7 +1024,8 @@ func (c *Client) findOwnedResources(ctx context.Context, ownerUID, namespace str
 			continue
 		}
 
-		for _, resource := range resourceList.APIResources {
+		for i := range resourceList.APIResources {
+			resource := &resourceList.APIResources[i]
 			// Skip non-namespaced resources if we have a namespace
 			if namespace != "" && !resource.Namespaced {
 				continue
@@ -1081,7 +1091,9 @@ func (c *Client) GetClusterHealth(ctx context.Context, includeMetrics, includeEv
 	nodes, err := c.clientset.CoreV1().Nodes().List(ctx, metav1.ListOptions{})
 	if err != nil {
 		result["healthy"] = false
-		result["issues"] = append(result["issues"].([]string), fmt.Sprintf("Failed to list nodes: %v", err))
+		if issuesList, ok := result["issues"].([]string); ok {
+			result["issues"] = append(issuesList, fmt.Sprintf("Failed to list nodes: %v", err))
+		}
 	} else {
 		nodeStatus := map[string]interface{}{
 			"total":    len(nodes.Items),
@@ -1090,7 +1102,8 @@ func (c *Client) GetClusterHealth(ctx context.Context, includeMetrics, includeEv
 			"nodes":    []map[string]interface{}{},
 		}
 
-		for _, node := range nodes.Items {
+		for i := range nodes.Items {
+			node := &nodes.Items[i]
 			nodeInfo := map[string]interface{}{
 				"name":       node.Name,
 				"ready":      false,
@@ -1146,7 +1159,8 @@ func (c *Client) GetClusterHealth(ctx context.Context, includeMetrics, includeEv
 				LabelSelector: label,
 			})
 			if err == nil && len(pods.Items) > 0 {
-				for _, pod := range pods.Items {
+				for j := range pods.Items {
+					pod := &pods.Items[j]
 					component := map[string]interface{}{
 						"name":      pod.Name,
 						"namespace": pod.Namespace,
@@ -1155,8 +1169,8 @@ func (c *Client) GetClusterHealth(ctx context.Context, includeMetrics, includeEv
 					}
 
 					// Check if all containers are ready
-					for _, cs := range pod.Status.ContainerStatuses {
-						if !cs.Ready {
+					for k := range pod.Status.ContainerStatuses {
+						if !pod.Status.ContainerStatuses[k].Ready {
 							component["ready"] = false
 							result["healthy"] = false
 							break
@@ -1180,7 +1194,8 @@ func (c *Client) GetClusterHealth(ctx context.Context, includeMetrics, includeEv
 			recentEvents := []map[string]interface{}{}
 			cutoff := time.Now().Add(-30 * time.Minute)
 
-			for _, event := range events.Items {
+			for i := range events.Items {
+				event := &events.Items[i]
 				if event.LastTimestamp.After(cutoff) {
 					recentEvents = append(recentEvents, map[string]interface{}{
 						"type":      event.Type,
@@ -1221,7 +1236,8 @@ func (c *Client) GetResourceQuotas(ctx context.Context, namespace string, showPe
 		return nil, fmt.Errorf("failed to list resource quotas: %w", err)
 	}
 
-	for _, quota := range quotas.Items {
+	for i := range quotas.Items {
+		quota := &quotas.Items[i]
 		quotaInfo := map[string]interface{}{
 			"name":      quota.Name,
 			"namespace": quota.Namespace,
@@ -1274,7 +1290,8 @@ func (c *Client) GetLimitRanges(ctx context.Context, namespace string) (map[stri
 		return nil, fmt.Errorf("failed to list limit ranges: %w", err)
 	}
 
-	for _, lr := range limitRanges.Items {
+	for i := range limitRanges.Items {
+		lr := &limitRanges.Items[i]
 		lrInfo := map[string]interface{}{
 			"name":      lr.Name,
 			"namespace": lr.Namespace,
@@ -1342,7 +1359,8 @@ func (c *Client) GetTopPods(ctx context.Context, namespace, sortBy string, limit
 
 	pods := make([]podUsage, 0, len(podMetricsList.Items))
 
-	for _, pm := range podMetricsList.Items {
+	for i := range podMetricsList.Items {
+		pm := &podMetricsList.Items[i]
 		var totalCPU, totalMemory int64
 
 		for _, container := range pm.Containers {
@@ -1418,7 +1436,8 @@ func (c *Client) GetTopNodes(ctx context.Context, sortBy string, includeConditio
 
 	nodeUsages := make([]nodeUsage, 0, len(nodes.Items))
 
-	for _, node := range nodes.Items {
+	for i := range nodes.Items {
+		node := &nodes.Items[i]
 		nodeInfo := map[string]interface{}{
 			"name": node.Name,
 		}
@@ -1559,7 +1578,8 @@ func (c *Client) GetPodDebugInfo(ctx context.Context, name, namespace string, in
 	}
 
 	// Container statuses
-	for _, cs := range pod.Status.ContainerStatuses {
+	for i := range pod.Status.ContainerStatuses {
+		cs := &pod.Status.ContainerStatuses[i]
 		containerInfo := map[string]interface{}{
 			"name":         cs.Name,
 			"ready":        cs.Ready,
@@ -1592,7 +1612,8 @@ func (c *Client) GetPodDebugInfo(ctx context.Context, name, namespace string, in
 		FieldSelector: fieldSelector,
 	})
 	if err == nil {
-		for _, event := range events.Items {
+		for i := range events.Items {
+			event := &events.Items[i]
 			result["events"] = append(result["events"].([]map[string]interface{}), map[string]interface{}{
 				"type":      event.Type,
 				"reason":    event.Reason,
@@ -1606,7 +1627,8 @@ func (c *Client) GetPodDebugInfo(ctx context.Context, name, namespace string, in
 
 	if includeLogs {
 		logs := make(map[string]string)
-		for _, cs := range pod.Status.ContainerStatuses {
+		for i := range pod.Status.ContainerStatuses {
+			cs := &pod.Status.ContainerStatuses[i]
 			tailLinesVal := int64(logLines)
 			logOptions := &corev1.PodLogOptions{
 				Container: cs.Name,
@@ -1680,8 +1702,8 @@ func (c *Client) GetServiceEndpoints(ctx context.Context, name, namespace string
 						endpointInfo["ready"] = true
 
 						// Check if all containers are ready
-						for _, cs := range pod.Status.ContainerStatuses {
-							if !cs.Ready {
+						for k := range pod.Status.ContainerStatuses {
+							if !pod.Status.ContainerStatuses[k].Ready {
 								endpointInfo["ready"] = false
 								break
 							}
@@ -1747,7 +1769,8 @@ func (c *Client) GetNetworkPolicies(ctx context.Context, namespace, podName stri
 		podLabels = pod.Labels
 	}
 
-	for _, policy := range policies.Items {
+	for i := range policies.Items {
+		policy := &policies.Items[i]
 		policyInfo := map[string]interface{}{
 			"name":      policy.Name,
 			"namespace": policy.Namespace,
@@ -1775,11 +1798,8 @@ func (c *Client) GetNetworkPolicies(ctx context.Context, namespace, podName stri
 		// Include full details if requested
 		if includeDetails {
 			policyInfo["spec"] = policy.Spec
-		} else {
-			// Just include a summary
-			if policy.Spec.PodSelector.MatchLabels != nil {
-				policyInfo["podSelector"] = policy.Spec.PodSelector.MatchLabels
-			}
+		} else if policy.Spec.PodSelector.MatchLabels != nil {
+			policyInfo["podSelector"] = policy.Spec.PodSelector.MatchLabels
 		}
 
 		result["policies"] = append(result["policies"].([]map[string]interface{}), policyInfo)
@@ -1830,7 +1850,8 @@ func (c *Client) GetSecurityContext(ctx context.Context, name, namespace string,
 
 	// Container-level security contexts
 	containers := []map[string]interface{}{}
-	for _, container := range pod.Spec.Containers {
+	for i := range pod.Spec.Containers {
+		container := &pod.Spec.Containers[i]
 		containerInfo := map[string]interface{}{
 			"name": container.Name,
 		}
@@ -1916,7 +1937,8 @@ func (c *Client) GetResourceHistory(ctx context.Context, kind, name, namespace s
 
 	// Filter and sort events by time
 	relevantEvents := []map[string]interface{}{}
-	for _, event := range events.Items {
+	for i := range events.Items {
+		event := &events.Items[i]
 		// Check if event is within the time window
 		if event.LastTimestamp.After(cutoff) || event.FirstTimestamp.After(cutoff) {
 			if event.InvolvedObject.Kind == canonicalKind {
@@ -2105,7 +2127,7 @@ func (c *Client) ExecInPod(ctx context.Context, name, namespace, command, contai
 
 	// Capture output
 	var stdout, stderr bytes.Buffer
-	err = executor.Stream(remotecommand.StreamOptions{
+	err = executor.StreamWithContext(ctx, remotecommand.StreamOptions{
 		Stdin:  nil,
 		Stdout: &stdout,
 		Stderr: &stderr,
@@ -2227,7 +2249,7 @@ func (c *Client) CopyFromPod(ctx context.Context, name, namespace, srcPath, dest
 	// Run the tar command in a goroutine
 	go func() {
 		defer writer.Close()
-		err := executor.Stream(remotecommand.StreamOptions{
+		err := executor.StreamWithContext(ctx, remotecommand.StreamOptions{
 			Stdout: writer,
 			Stderr: &stderr,
 		})
@@ -2342,7 +2364,8 @@ func (c *Client) ListNamespaces(ctx context.Context, labelSelector string) ([]ma
 	}
 
 	result := make([]map[string]interface{}, 0, len(nsList.Items))
-	for _, ns := range nsList.Items {
+	for i := range nsList.Items {
+		ns := &nsList.Items[i]
 		result = append(result, map[string]interface{}{
 			"name":    ns.Name,
 			"status":  string(ns.Status.Phase),

@@ -309,7 +309,7 @@ func handleHealth(w http.ResponseWriter, r *http.Request, client *k8s.Client) {
 
 	if err := client.CheckConnection(); err != nil {
 		w.WriteHeader(http.StatusServiceUnavailable)
-		_, _ = w.Write([]byte(fmt.Sprintf("unhealthy: %v", err)))
+		fmt.Fprintf(w, "unhealthy: %v", err)
 		return
 	}
 
