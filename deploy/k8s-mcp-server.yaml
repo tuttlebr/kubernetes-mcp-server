@@ -1,0 +1,211 @@
+---
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: k8s-mcp-server
+  labels:
+    app: k8s-mcp-server
+
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: k8s-mcp-server
+  namespace: k8s-mcp-server
+  labels:
+    app: k8s-mcp-server
+
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: k8s-mcp-server-readonly
+  labels:
+    app: k8s-mcp-server
+rules:
+  - apiGroups: [""]
+    resources:
+      - pods
+      - pods/log
+      - services
+      - endpoints
+      - configmaps
+      - secrets
+      - namespaces
+      - nodes
+      - persistentvolumes
+      - persistentvolumeclaims
+      - events
+      - replicationcontrollers
+      - serviceaccounts
+      - resourcequotas
+      - limitranges
+    verbs: ["get", "list", "watch"]
+  - apiGroups: ["apps"]
+    resources:
+      - deployments
+      - replicasets
+      - statefulsets
+      - daemonsets
+    verbs: ["get", "list", "watch"]
+  - apiGroups: ["batch"]
+    resources:
+      - jobs
+      - cronjobs
+    verbs: ["get", "list", "watch"]
+  - apiGroups: ["networking.k8s.io"]
+    resources:
+      - ingresses
+      - networkpolicies
+      - ingressclasses
+    verbs: ["get", "list", "watch"]
+  - apiGroups: ["storage.k8s.io"]
+    resources:
+      - storageclasses
+      - volumeattachments
+    verbs: ["get", "list", "watch"]
+  - apiGroups: ["rbac.authorization.k8s.io"]
+    resources:
+      - roles
+      - rolebindings
+      - clusterroles
+      - clusterrolebindings
+    verbs: ["get", "list", "watch"]
+  - apiGroups: ["autoscaling"]
+    resources:
+      - horizontalpodautoscalers
+    verbs: ["get", "list", "watch"]
+  - apiGroups: ["policy"]
+    resources:
+      - poddisruptionbudgets
+      - podsecuritypolicies
+    verbs: ["get", "list", "watch"]
+  - apiGroups: ["metrics.k8s.io"]
+    resources:
+      - pods
+      - nodes
+    verbs: ["get", "list"]
+  - apiGroups: [""]
+    resources:
+      - componentstatuses
+    verbs: ["get", "list"]
+  - nonResourceURLs: ["/api", "/api/*", "/apis", "/apis/*", "/healthz", "/version"]
+    verbs: ["get"]
+
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: k8s-mcp-server-readonly
+  labels:
+    app: k8s-mcp-server
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: k8s-mcp-server-readonly
+subjects:
+  - kind: ServiceAccount
+    name: k8s-mcp-server
+    namespace: k8s-mcp-server
+
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: k8s-mcp-server
+  namespace: k8s-mcp-server
+  labels:
+    app: k8s-mcp-server
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: k8s-mcp-server
+  template:
+    metadata:
+      labels:
+        app: k8s-mcp-server
+    spec:
+      serviceAccountName: k8s-mcp-server
+      containers:
+        - name: k8s-mcp-server
+          image: daedalus.ddns.me:5050/btuttle/k8s-mcp-server:latest
+          imagePullPolicy: Always
+          ports:
+            - containerPort: 8080
+              name: http
+              protocol: TCP
+          env:
+            - name: SERVER_MODE
+              value: "streamable-http"
+            - name: SERVER_PORT
+              value: "8080"
+            - name: KUBECONFIG
+              value: "/home/appuser/.kube/config"
+          resources:
+            requests:
+              memory: "64Mi"
+              cpu: "50m"
+            limits:
+              memory: "256Mi"
+              cpu: "500m"
+          volumeMounts:
+            - name: kubeconfig
+              mountPath: /home/appuser/.kube
+              readOnly: true
+            - name: tmp
+              mountPath: /tmp
+            - name: helm-cache
+              mountPath: /home/appuser/.cache/helm
+            - name: helm-config
+              mountPath: /home/appuser/.config/helm
+          livenessProbe:
+            httpGet:
+              path: /healthz
+              port: 8080
+            initialDelaySeconds: 10
+            periodSeconds: 30
+            timeoutSeconds: 5
+          readinessProbe:
+            httpGet:
+              path: /healthz
+              port: 8080
+            initialDelaySeconds: 5
+            periodSeconds: 10
+            timeoutSeconds: 3
+          securityContext:
+            runAsNonRoot: true
+            runAsUser: 1001
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop:
+                - ALL
+      volumes:
+        - name: kubeconfig
+          secret:
+            secretName: k8s-mcp-kubeconfig
+        - name: tmp
+          emptyDir: {}
+        - name: helm-cache
+          emptyDir: {}
+        - name: helm-config
+          emptyDir: {}
+
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: k8s-mcp-server
+  namespace: k8s-mcp-server
+  labels:
+    app: k8s-mcp-server
+spec:
+  type: ClusterIP
+  selector:
+    app: k8s-mcp-server
+  ports:
+    - port: 8080
+      targetPort: 8080
+      protocol: TCP
+      name: http

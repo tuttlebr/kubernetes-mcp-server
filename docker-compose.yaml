@@ -1,0 +1,15 @@
+services:
+  k8s-mcp-server-read-only:
+    build:
+      context: src
+      dockerfile: Dockerfile
+    image: daedalus.ddns.me:5050/btuttle/k8s-mcp-server:latest
+    environment:
+      - KUBECONFIG=/home/appuser/.kube/config
+      - SERVER_MODE=streamable-http
+      - SERVER_PORT=8080
+    volumes:
+      - ./kube:/home/appuser/.kube
+    ports:
+      - 8080:8080
+    restart: unless-stopped

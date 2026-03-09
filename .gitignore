@@ -1,0 +1,20 @@
+# Kubernetes credentials and discovery cache
+kube/config
+kube/cache/
+
+# Go build artifacts
+src/k8s-mcp-server
+*.exe
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Upstream embedded git repo (src is a fork)
+src/.git/
