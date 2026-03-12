@@ -167,6 +167,9 @@ func main() {
 		s.AddTool(tools.GetResourceHistoryTool(), handlers.GetResourceHistory(client))
 		s.AddTool(tools.ValidateManifestTool(), handlers.ValidateManifest(client))
 
+		// Cluster Overview (Read-Only)
+		s.AddTool(tools.GetClusterSummaryTool(), handlers.GetClusterSummary(client))
+
 		// Namespace & cluster navigation (Read-Only)
 		s.AddTool(tools.ListNamespacesTool(), handlers.ListNamespaces(client))
 		s.AddTool(tools.GetRolloutStatusTool(), handlers.GetRolloutStatus(client))

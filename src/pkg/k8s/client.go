@@ -2577,3 +2577,268 @@ func (c *Client) SwitchContext(ctx context.Context, contextName string) (map[str
 		"status":        "switched",
 	}, nil
 }
+
+// GetClusterSummary gathers a concise, high-level overview of the cluster's
+// current state in a single call. It collects context info, server version,
+// node health, namespace listing, workload rollup, pod phase counts, and
+// recent warning events — enough for an LLM to answer "What's the status
+// of my cluster?" without follow-up tool calls.
+func (c *Client) GetClusterSummary(ctx context.Context, includeNamespaceDetails bool) (map[string]interface{}, error) {
+	summary := map[string]interface{}{}
+
+	// --- Cluster identity ---
+	contextInfo, err := c.ListContexts()
+	if err == nil {
+		if cur, ok := contextInfo["currentContext"]; ok {
+			summary["currentContext"] = cur
+		}
+	}
+
+	version, err := c.clientset.Discovery().ServerVersion()
+	if err == nil {
+		summary["serverVersion"] = version.GitVersion
+		summary["platform"] = version.Platform
+	}
+
+	// --- Node health ---
+	nodes, err := c.clientset.CoreV1().Nodes().List(ctx, metav1.ListOptions{})
+	if err != nil {
+		summary["nodeError"] = err.Error()
+	} else {
+		readyCount := 0
+		notReadyNodes := []string{}
+		for i := range nodes.Items {
+			node := &nodes.Items[i]
+			ready := false
+			for _, cond := range node.Status.Conditions {
+				if cond.Type == corev1.NodeReady && cond.Status == corev1.ConditionTrue {
+					ready = true
+					break
+				}
+			}
+			if ready {
+				readyCount++
+			} else {
+				notReadyNodes = append(notReadyNodes, node.Name)
+			}
+		}
+		nodeInfo := map[string]interface{}{
+			"total": len(nodes.Items),
+			"ready": readyCount,
+		}
+		if len(notReadyNodes) > 0 {
+			nodeInfo["notReadyNodes"] = notReadyNodes
+		}
+		summary["nodes"] = nodeInfo
+	}
+
+	// --- Namespaces ---
+	nsList, err := c.clientset.CoreV1().Namespaces().List(ctx, metav1.ListOptions{})
+	if err != nil {
+		summary["namespaceError"] = err.Error()
+	} else {
+		nsNames := make([]string, 0, len(nsList.Items))
+		for i := range nsList.Items {
+			nsNames = append(nsNames, nsList.Items[i].Name)
+		}
+		summary["namespaceCount"] = len(nsList.Items)
+
+		if !includeNamespaceDetails {
+			summary["namespaces"] = nsNames
+		}
+	}
+
+	// --- Workload & pod rollup per namespace ---
+	if includeNamespaceDetails && nsList != nil {
+		nsDetails := make([]map[string]interface{}, 0, len(nsList.Items))
+
+		for i := range nsList.Items {
+			ns := nsList.Items[i].Name
+			detail := map[string]interface{}{"namespace": ns}
+
+			// Deployments
+			deps, err := c.clientset.AppsV1().Deployments(ns).List(ctx, metav1.ListOptions{})
+			if err == nil && len(deps.Items) > 0 {
+				total := len(deps.Items)
+				healthy := 0
+				unhealthy := []string{}
+				for j := range deps.Items {
+					d := &deps.Items[j]
+					if d.Status.ReadyReplicas == *d.Spec.Replicas && d.Status.UnavailableReplicas == 0 {
+						healthy++
+					} else {
+						unhealthy = append(unhealthy, fmt.Sprintf("%s (%d/%d ready)",
+							d.Name, d.Status.ReadyReplicas, *d.Spec.Replicas))
+					}
+				}
+				depInfo := map[string]interface{}{"total": total, "healthy": healthy}
+				if len(unhealthy) > 0 {
+					depInfo["unhealthy"] = unhealthy
+				}
+				detail["deployments"] = depInfo
+			}
+
+			// StatefulSets
+			sts, err := c.clientset.AppsV1().StatefulSets(ns).List(ctx, metav1.ListOptions{})
+			if err == nil && len(sts.Items) > 0 {
+				total := len(sts.Items)
+				healthy := 0
+				unhealthy := []string{}
+				for j := range sts.Items {
+					s := &sts.Items[j]
+					if s.Status.ReadyReplicas == *s.Spec.Replicas {
+						healthy++
+					} else {
+						unhealthy = append(unhealthy, fmt.Sprintf("%s (%d/%d ready)",
+							s.Name, s.Status.ReadyReplicas, *s.Spec.Replicas))
+					}
+				}
+				stsInfo := map[string]interface{}{"total": total, "healthy": healthy}
+				if len(unhealthy) > 0 {
+					stsInfo["unhealthy"] = unhealthy
+				}
+				detail["statefulSets"] = stsInfo
+			}
+
+			// DaemonSets
+			dsList, err := c.clientset.AppsV1().DaemonSets(ns).List(ctx, metav1.ListOptions{})
+			if err == nil && len(dsList.Items) > 0 {
+				total := len(dsList.Items)
+				healthy := 0
+				unhealthy := []string{}
+				for j := range dsList.Items {
+					ds := &dsList.Items[j]
+					if ds.Status.NumberReady == ds.Status.DesiredNumberScheduled && ds.Status.NumberUnavailable == 0 {
+						healthy++
+					} else {
+						unhealthy = append(unhealthy, fmt.Sprintf("%s (%d/%d ready)",
+							ds.Name, ds.Status.NumberReady, ds.Status.DesiredNumberScheduled))
+					}
+				}
+				dsInfo := map[string]interface{}{"total": total, "healthy": healthy}
+				if len(unhealthy) > 0 {
+					dsInfo["unhealthy"] = unhealthy
+				}
+				detail["daemonSets"] = dsInfo
+			}
+
+			// Jobs with failures
+			jobs, err := c.clientset.BatchV1().Jobs(ns).List(ctx, metav1.ListOptions{})
+			if err == nil && len(jobs.Items) > 0 {
+				total := len(jobs.Items)
+				failed := 0
+				active := 0
+				succeeded := 0
+				for j := range jobs.Items {
+					job := &jobs.Items[j]
+					if job.Status.Failed > 0 {
+						failed++
+					} else if job.Status.Active > 0 {
+						active++
+					} else if job.Status.Succeeded > 0 {
+						succeeded++
+					}
+				}
+				detail["jobs"] = map[string]interface{}{
+					"total": total, "active": active, "succeeded": succeeded, "failed": failed,
+				}
+			}
+
+			nsDetails = append(nsDetails, detail)
+		}
+		summary["namespaceDetails"] = nsDetails
+	}
+
+	// --- Pod phase summary (cluster-wide) ---
+	pods, err := c.clientset.CoreV1().Pods("").List(ctx, metav1.ListOptions{})
+	if err != nil {
+		summary["podError"] = err.Error()
+	} else {
+		phaseCounts := map[string]int{}
+		crashLoopPods := []string{}
+		for i := range pods.Items {
+			pod := &pods.Items[i]
+			phaseCounts[string(pod.Status.Phase)]++
+			for j := range pod.Status.ContainerStatuses {
+				cs := &pod.Status.ContainerStatuses[j]
+				if cs.State.Waiting != nil && cs.State.Waiting.Reason == "CrashLoopBackOff" {
+					crashLoopPods = append(crashLoopPods, fmt.Sprintf("%s/%s", pod.Namespace, pod.Name))
+					break
+				}
+			}
+		}
+		podSummary := map[string]interface{}{
+			"total":  len(pods.Items),
+			"phases": phaseCounts,
+		}
+		if len(crashLoopPods) > 0 {
+			podSummary["crashLoopBackOff"] = crashLoopPods
+		}
+		summary["pods"] = podSummary
+	}
+
+	// --- Control plane quick check ---
+	cpLabels := []string{
+		"component=kube-apiserver",
+		"component=kube-controller-manager",
+		"component=kube-scheduler",
+		"component=etcd",
+	}
+	cpHealthy := true
+	cpIssues := []string{}
+	for _, label := range cpLabels {
+		cpPods, err := c.clientset.CoreV1().Pods("kube-system").List(ctx, metav1.ListOptions{
+			LabelSelector: label,
+		})
+		if err != nil || len(cpPods.Items) == 0 {
+			continue
+		}
+		for j := range cpPods.Items {
+			pod := &cpPods.Items[j]
+			for k := range pod.Status.ContainerStatuses {
+				if !pod.Status.ContainerStatuses[k].Ready {
+					cpHealthy = false
+					cpIssues = append(cpIssues, fmt.Sprintf("%s not ready", pod.Name))
+				}
+			}
+		}
+	}
+	cp := map[string]interface{}{"healthy": cpHealthy}
+	if len(cpIssues) > 0 {
+		cp["issues"] = cpIssues
+	}
+	summary["controlPlane"] = cp
+
+	// --- Recent warning events (last 1 hour) ---
+	events, err := c.clientset.CoreV1().Events("").List(ctx, metav1.ListOptions{
+		FieldSelector: "type!=Normal",
+	})
+	if err == nil {
+		cutoff := time.Now().Add(-1 * time.Hour)
+		warnings := []map[string]interface{}{}
+		for i := range events.Items {
+			ev := &events.Items[i]
+			if ev.LastTimestamp.After(cutoff) {
+				warnings = append(warnings, map[string]interface{}{
+					"type":      ev.Type,
+					"reason":    ev.Reason,
+					"message":   ev.Message,
+					"object":    fmt.Sprintf("%s/%s", ev.InvolvedObject.Kind, ev.InvolvedObject.Name),
+					"namespace": ev.Namespace,
+					"count":     ev.Count,
+				})
+			}
+		}
+		if len(warnings) > 0 {
+			if len(warnings) > 50 {
+				summary["recentWarnings"] = warnings[:50]
+				summary["recentWarningsTruncated"] = true
+				summary["totalRecentWarnings"] = len(warnings)
+			} else {
+				summary["recentWarnings"] = warnings
+			}
+		}
+	}
+
+	return summary, nil
+}

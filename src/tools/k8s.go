@@ -641,6 +641,24 @@ func ListContextsTool() mcp.Tool {
 	)
 }
 
+// GetClusterSummaryTool creates a tool for getting a concise, high-level cluster status overview.
+func GetClusterSummaryTool() mcp.Tool {
+	return mcp.NewTool(
+		"getClusterSummary",
+		mcp.WithDescription("Get a concise, high-level summary of the entire Kubernetes cluster's current status in a single call. "+
+			"Returns the active context, server version, node health, namespace listing, workload health per namespace "+
+			"(deployments, statefulsets, daemonsets, jobs), pod phase counts, control plane status, and recent warning events. "+
+			"This is the best tool to call when the user asks general questions like 'What is the status of my cluster?', "+
+			"'Is everything healthy?', or 'Give me an overview'. "+
+			"For deeper investigation of a specific issue found in the summary, follow up with getClusterHealth, "+
+			"getPodDebugInfo, or getNamespaceResources."),
+		mcp.WithBoolean("includeNamespaceDetails",
+			mcp.Description("Include per-namespace workload breakdown (deployments, statefulsets, daemonsets, jobs with health status). "+
+				"Set to false for a faster, lighter summary that only lists namespace names. Default: true."),
+			mcp.DefaultBool(true)),
+	)
+}
+
 // SwitchContextTool creates a tool for switching the active kubeconfig context.
 func SwitchContextTool() mcp.Tool {
 	return mcp.NewTool(

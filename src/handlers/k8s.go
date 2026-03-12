@@ -1232,6 +1232,29 @@ func ScaleResource(client *k8s.Client) func(ctx context.Context, request mcp.Cal
 	}
 }
 
+func GetClusterSummary(client *k8s.Client) func(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+	return func(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+		args, ok := request.Params.Arguments.(map[string]interface{})
+		if !ok {
+			args = map[string]interface{}{}
+		}
+
+		includeNamespaceDetails := getBoolArg(args, "includeNamespaceDetails", true)
+
+		summary, err := client.GetClusterSummary(ctx, includeNamespaceDetails)
+		if err != nil {
+			return nil, fmt.Errorf("failed to get cluster summary: %w", err)
+		}
+
+		jsonResponse, err := json.Marshal(summary)
+		if err != nil {
+			return nil, fmt.Errorf("failed to serialize response: %w", err)
+		}
+
+		return mcp.NewToolResultText(string(jsonResponse)), nil
+	}
+}
+
 func ListContexts(client *k8s.Client) func(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 	return func(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 		contexts, err := client.ListContexts()
