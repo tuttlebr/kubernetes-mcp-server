@@ -215,13 +215,13 @@ func (c *Client) ListResources(ctx context.Context, kind, namespace, labelSelect
 
 	var resources []map[string]interface{}
 	for _, item := range list.Items {
-		metadata := item.GetLabels()
-		resources = append(resources, map[string]interface{}{
-			"name":      item.GetName(),
-			"kind":      item.GetKind(),
-			"namespace": item.GetNamespace(),
-			"labels":    metadata,
-		})
+		content := item.UnstructuredContent()
+		// Remove verbose metadata fields that add noise without value
+		if metadata, ok := content["metadata"].(map[string]interface{}); ok {
+			delete(metadata, "managedFields")
+			delete(metadata, "selfLink")
+		}
+		resources = append(resources, content)
 	}
 
 	return resources, nil
