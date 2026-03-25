@@ -31,6 +31,11 @@ mcp_tool_names:
   - getResourceHistory
   - validateManifest
 
+  # Kubernetes — GPU Debugging & Troubleshooting (Read-Only)
+  - getGPUClusterOverview
+  - diagnoseGPUScheduling
+  - getGPUOperatorHealth
+
   # Kubernetes — Navigation (Read-Only)
   - listNamespaces
   - getRolloutStatus
@@ -44,6 +49,7 @@ mcp_tool_names:
   - execInPod
   - scaleResource
   - switchContext
+  - remediateGPUIssue
 
   # Helm — Read-Only
   - helmList

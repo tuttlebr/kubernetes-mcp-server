@@ -170,6 +170,11 @@ func main() {
 		// Cluster Overview (Read-Only)
 		s.AddTool(tools.GetClusterSummaryTool(), handlers.GetClusterSummary(client))
 
+		// GPU Debugging & Troubleshooting (Read-Only)
+		s.AddTool(tools.GetGPUClusterOverviewTool(), handlers.GetGPUClusterOverview(client))
+		s.AddTool(tools.DiagnoseGPUSchedulingTool(), handlers.DiagnoseGPUScheduling(client))
+		s.AddTool(tools.GetGPUOperatorHealthTool(), handlers.GetGPUOperatorHealth(client))
+
 		// Namespace & cluster navigation (Read-Only)
 		s.AddTool(tools.ListNamespacesTool(), handlers.ListNamespaces(client))
 		s.AddTool(tools.GetRolloutStatusTool(), handlers.GetRolloutStatus(client))
@@ -183,6 +188,9 @@ func main() {
 			s.AddTool(tools.ExecInPodTool(), handlers.ExecInPod(client))
 			s.AddTool(tools.ScaleResourceTool(), handlers.ScaleResource(client))
 			s.AddTool(tools.SwitchContextTool(), handlers.SwitchContext(client))
+
+			// GPU Remediation (Write)
+			s.AddTool(tools.RemediateGPUIssueTool(), handlers.RemediateGPUIssue(client))
 		}
 	}
 
