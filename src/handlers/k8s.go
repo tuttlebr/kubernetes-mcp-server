@@ -1271,6 +1271,44 @@ func ListContexts(client *k8s.Client) func(ctx context.Context, request mcp.Call
 	}
 }
 
+// RunKubectlCommand returns a handler for the runKubectlCommand tool.
+func RunKubectlCommand(client *k8s.Client) func(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+	return func(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+		args, ok := request.Params.Arguments.(map[string]interface{})
+		if !ok {
+			return nil, fmt.Errorf("invalid arguments type: expected map[string]interface{}")
+		}
+
+		command, err := getRequiredStringArg(args, "command")
+		if err != nil {
+			return nil, err
+		}
+
+		// Handle timeout as either float64 or int
+		timeout := 30
+		if val, ok := args["timeout"]; ok {
+			switch v := val.(type) {
+			case float64:
+				timeout = int(v)
+			case int:
+				timeout = v
+			}
+		}
+
+		result, err := client.RunKubectlCommand(ctx, command, timeout)
+		if err != nil {
+			return nil, fmt.Errorf("failed to run kubectl command: %w", err)
+		}
+
+		jsonResponse, err := json.Marshal(result)
+		if err != nil {
+			return nil, fmt.Errorf("failed to serialize response: %w", err)
+		}
+
+		return mcp.NewToolResultText(string(jsonResponse)), nil
+	}
+}
+
 func SwitchContext(client *k8s.Client) func(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 	return func(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 		args, ok := request.Params.Arguments.(map[string]interface{})

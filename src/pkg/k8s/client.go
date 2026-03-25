@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"sort"
 	"strconv"
@@ -131,6 +132,67 @@ func NewClient(kubeconfigPath string) (*Client, error) {
 func (c *Client) CheckConnection() error {
 	_, err := c.clientset.Discovery().ServerVersion()
 	return err
+}
+
+// RunKubectlCommand executes an arbitrary kubectl command pipeline via the host shell.
+// The command must start with "kubectl". It is executed with the client's kubeconfig
+// set via the KUBECONFIG environment variable so that it targets the correct cluster.
+func (c *Client) RunKubectlCommand(ctx context.Context, command string, timeoutSec int) (map[string]interface{}, error) {
+	// Validate the command starts with kubectl
+	trimmed := strings.TrimSpace(command)
+	if !strings.HasPrefix(trimmed, "kubectl") {
+		return nil, fmt.Errorf("command must start with 'kubectl', got: %q", trimmed)
+	}
+
+	// Clamp timeout
+	if timeoutSec <= 0 {
+		timeoutSec = 30
+	}
+	if timeoutSec > 300 {
+		timeoutSec = 300
+	}
+
+	cmdCtx, cancel := context.WithTimeout(ctx, time.Duration(timeoutSec)*time.Second)
+	defer cancel()
+
+	cmd := exec.CommandContext(cmdCtx, "sh", "-c", trimmed)
+
+	// Pass kubeconfig so kubectl targets the same cluster as the MCP server
+	cmd.Env = os.Environ()
+	if c.kubeconfigPath != "" {
+		cmd.Env = append(cmd.Env, "KUBECONFIG="+c.kubeconfigPath)
+	}
+
+	var stdout, stderr bytes.Buffer
+	cmd.Stdout = &stdout
+	cmd.Stderr = &stderr
+
+	err := cmd.Run()
+
+	result := map[string]interface{}{
+		"command": trimmed,
+		"stdout":  stdout.String(),
+	}
+
+	if stderr.Len() > 0 {
+		result["stderr"] = stderr.String()
+	}
+
+	if err != nil {
+		if cmdCtx.Err() == context.DeadlineExceeded {
+			result["error"] = fmt.Sprintf("command timed out after %d seconds", timeoutSec)
+		} else {
+			result["error"] = err.Error()
+		}
+		result["exitCode"] = -1
+		if exitErr, ok := err.(*exec.ExitError); ok {
+			result["exitCode"] = exitErr.ExitCode()
+		}
+	} else {
+		result["exitCode"] = 0
+	}
+
+	return result, nil
 }
 
 // GetAPIResources retrieves all API resource types in the cluster.

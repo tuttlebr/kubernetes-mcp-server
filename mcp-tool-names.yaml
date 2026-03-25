@@ -50,6 +50,7 @@ mcp_tool_names:
   - scaleResource
   - switchContext
   - remediateGPUIssue
+  - runKubectlCommand
 
   # Helm — Read-Only
   - helmList

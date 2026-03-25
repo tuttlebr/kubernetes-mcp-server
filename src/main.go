@@ -191,6 +191,9 @@ func main() {
 
 			// GPU Remediation (Write)
 			s.AddTool(tools.RemediateGPUIssueTool(), handlers.RemediateGPUIssue(client))
+
+			// Kubectl Command Pipeline (Write)
+			s.AddTool(tools.RunKubectlCommandTool(), handlers.RunKubectlCommand(client))
 		}
 	}
 
