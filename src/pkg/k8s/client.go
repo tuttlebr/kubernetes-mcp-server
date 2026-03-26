@@ -134,6 +134,12 @@ func (c *Client) CheckConnection() error {
 	return err
 }
 
+// KubeconfigPath returns the resolved kubeconfig file path used by this client.
+// Returns empty string when running with in-cluster config.
+func (c *Client) KubeconfigPath() string {
+	return c.kubeconfigPath
+}
+
 // RunKubectlCommand executes an arbitrary kubectl command pipeline via the host shell.
 // The command must start with "kubectl". It is executed with the client's kubeconfig
 // set via the KUBECONFIG environment variable so that it targets the correct cluster.
@@ -246,7 +252,7 @@ func (c *Client) GetResource(ctx context.Context, kind, name, namespace string) 
 		return nil, fmt.Errorf("failed to retrieve resource: %w", err)
 	}
 
-	return obj.UnstructuredContent(), nil
+	return SanitizeResource(obj.UnstructuredContent()), nil
 }
 
 // ListResources lists all instances of a specific resource type.
@@ -283,7 +289,7 @@ func (c *Client) ListResources(ctx context.Context, kind, namespace, labelSelect
 			delete(metadata, "managedFields")
 			delete(metadata, "selfLink")
 		}
-		resources = append(resources, content)
+		resources = append(resources, SanitizeResource(content))
 	}
 
 	return resources, nil

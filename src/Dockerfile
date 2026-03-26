@@ -1,4 +1,4 @@
-# Use the official Golang image with the latest version for building
+# Stage 1: Build the Go binary
 FROM --platform=$BUILDPLATFORM golang:alpine AS builder
 
 # Install git (required for go modules) and update all packages
@@ -27,11 +27,16 @@ ARG TARGETARCH
 RUN CGO_ENABLED=0 GOOS=${TARGETOS:-linux} GOARCH=${TARGETARCH:-amd64} \
     go build -ldflags="-w -s" -o k8s-mcp-server main.go
 
-# Use a minimal base image instead of scratch for better compatibility
+# Stage 2: Install opencode for agent debugging support
+FROM oven/bun:1-alpine AS opencode-installer
+RUN bun install -g opencode-ai
+
+# Stage 3: Final runtime image
 FROM alpine:latest
 
-# Install ca-certificates, curl for health checks, and tzdata for timezone
-RUN apk --no-cache add ca-certificates curl tzdata
+# Install ca-certificates, curl for health checks, tzdata for timezone,
+# and gcompat + libstdc++ for Bun/opencode runtime
+RUN apk --no-cache add ca-certificates curl tzdata gcompat libstdc++
 
 # Set timezone
 ENV TZ=America/New_York
@@ -42,9 +47,12 @@ RUN addgroup -g 1001 -S appgroup && \
 
 # Copy the binary from the builder stage
 COPY --from=builder /app/k8s-mcp-server /usr/local/bin/k8s-mcp-server
-
-# Make the binary executable
 RUN chmod +x /usr/local/bin/k8s-mcp-server
+
+# Copy Bun runtime and opencode for agent debugging
+COPY --from=opencode-installer /usr/local/bin/bun /usr/local/bin/bun
+COPY --from=opencode-installer --chown=1001:1001 /root/.bun/install/global /home/appuser/.bun/install/global
+RUN ln -s /home/appuser/.bun/install/global/node_modules/.bin/opencode /usr/local/bin/opencode
 
 # Switch to non-root user
 USER appuser

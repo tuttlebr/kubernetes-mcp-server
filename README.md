@@ -1,6 +1,6 @@
 # Kubernetes & Helm MCP Server
 
-A [Model Context Protocol (MCP)](https://modelcontextprotocol.io/) server that exposes **43 tools** for managing Kubernetes clusters and Helm releases through any MCP-compatible client. Built in Go for low resource overhead, it supports multi-cluster context switching, read-only mode, and in-cluster or kubeconfig-based authentication.
+A [Model Context Protocol (MCP)](https://modelcontextprotocol.io/) server that exposes **44 tools** for managing Kubernetes clusters and Helm releases through any MCP-compatible client. Built in Go for low resource overhead, it supports multi-cluster context switching, read-only mode, in-cluster or kubeconfig-based authentication, and **autonomous AI-driven debugging** via [opencode](https://github.com/anomalyco/opencode) integration.
 
 ## Table of Contents
 
@@ -8,6 +8,7 @@ A [Model Context Protocol (MCP)](https://modelcontextprotocol.io/) server that e
 - [Architecture](#architecture)
 - [Quick Start](#quick-start)
 - [Configuration](#configuration)
+- [Agent Debugging](#agent-debugging)
 - [Tool Reference](#tool-reference)
 - [Deployment](#deployment)
 - [Security](#security)
@@ -24,6 +25,7 @@ A [Model Context Protocol (MCP)](https://modelcontextprotocol.io/) server that e
 | **Monitoring**             | Cluster health checks, top pods/nodes by CPU or memory, resource quotas, limit ranges                                                              |
 | **Debugging**              | Pod debug info (conditions + events + logs), service endpoint health, network policy analysis, security context inspection, resource event history |
 | **Mutations**              | Create/update resources from JSON or YAML, delete resources, scale workloads, rollout restarts, exec in pods, manifest dry-run validation          |
+| **Agent Debugging**        | Autonomous AI agent that investigates cluster issues end-to-end using all available MCP tools, powered by any OpenAI-compatible LLM                |
 | **Navigation**             | List namespaces, list/switch kubeconfig contexts, rollout status                                                                                   |
 
 **Helm Operations** — 9 tools for chart lifecycle management:
@@ -42,15 +44,19 @@ src/
 ├── main.go              # Server entry point, tool registration, transport setup
 ├── tools/
 │   ├── k8s.go           # Kubernetes MCP tool definitions (schemas)
-│   └── helm.go          # Helm MCP tool definitions (schemas)
+│   ├── helm.go          # Helm MCP tool definitions (schemas)
+│   └── agent.go         # Agent debugging tool definition
 ├── handlers/
 │   ├── k8s.go           # Kubernetes tool handlers (request → response)
-│   └── helm.go          # Helm tool handlers (request → response)
+│   ├── helm.go          # Helm tool handlers (request → response)
+│   └── agent.go         # Agent debugging handler
 └── pkg/
     ├── k8s/
     │   └── client.go    # Kubernetes client (dynamic, discovery, metrics, typed)
-    └── helm/
-        └── client.go    # Helm client (install, upgrade, release management)
+    ├── helm/
+    │   └── client.go    # Helm client (install, upgrade, release management)
+    └── agent/
+        └── agent.go     # OpenCode agent orchestration (subprocess, config, parsing)
 ```
 
 The server uses a **dynamic Kubernetes client** with a cached GVR (GroupVersionResource) resolver backed by the discovery API, so it works with any resource type — including CRDs — without hardcoded mappings.
@@ -136,6 +142,16 @@ services:
 
 `--no-k8s` and `--no-helm` cannot be used together.
 
+### Agent Debugging Environment Variables
+
+These are **optional**. When all three are set, the `agentDebug` tool is registered (requires write mode).
+
+| Variable           | Description                                                         | Example                                |
+| ------------------ | ------------------------------------------------------------------- | -------------------------------------- |
+| `OPENCODE_BASE_URL` | OpenAI-compatible API base URL                                     | `http://llm.local:8080/v1`            |
+| `OPENCODE_API_KEY`  | API key for the LLM provider                                      | `sk-...`                               |
+| `OPENCODE_MODEL`    | Model ID in `provider/model` format                                | `private-llm/llama-3.1-70b`           |
+
 ### Kubeconfig Resolution Order
 
 1. Explicit path via `KUBECONFIG` environment variable
@@ -145,6 +161,59 @@ services:
 ### Health Check
 
 All HTTP modes expose `GET /healthz` which verifies connectivity to the Kubernetes API server. Returns `200 ok` or `503 unhealthy: <error>`.
+
+## Agent Debugging
+
+The `agentDebug` tool launches an autonomous AI agent that investigates Kubernetes issues end-to-end. It uses [opencode](https://github.com/anomalyco/opencode) to run a headless agentic loop — the agent has access to all k8s and Helm MCP tools and will systematically inspect cluster state, logs, events, and configurations to produce a structured diagnosis.
+
+### How It Works
+
+1. You call `agentDebug` with a natural language description of the issue
+2. The server spawns `opencode run` as a headless subprocess
+3. OpenCode connects to a child k8s-mcp-server (stdio) for cluster access
+4. The agent autonomously calls MCP tools to investigate
+5. Returns a structured report: root cause, evidence, remediation steps, prevention
+
+### Prerequisites
+
+- [opencode](https://github.com/anomalyco/opencode) CLI installed (included in Docker image)
+- An OpenAI-compatible LLM endpoint accessible from the server
+- Environment variables set: `OPENCODE_BASE_URL`, `OPENCODE_API_KEY`, `OPENCODE_MODEL`
+
+### Kubernetes Deployment
+
+Create a Secret with your LLM provider credentials:
+
+```bash
+kubectl -n k8s-mcp-server create secret generic k8s-mcp-agent-config \
+  --from-literal=base-url="http://llm.local:8080/v1" \
+  --from-literal=api-key="sk-your-api-key" \
+  --from-literal=model="private-llm/llama-3.1-70b" \
+  --dry-run=client -o yaml | kubectl apply -f -
+```
+
+The deployment manifest references this Secret with `optional: true`, so the server works fine without it — the `agentDebug` tool simply won't be registered.
+
+### Docker Compose
+
+Set the env vars in your shell before running, or add them to a `.env` file:
+
+```bash
+export OPENCODE_BASE_URL="http://llm.local:8080/v1"
+export OPENCODE_API_KEY="sk-your-api-key"
+export OPENCODE_MODEL="private-llm/llama-3.1-70b"
+docker compose up
+```
+
+### Tool Parameters
+
+| Parameter  | Required | Default | Description                                                          |
+| ---------- | -------- | ------- | -------------------------------------------------------------------- |
+| `prompt`   | Yes      | —       | Natural language description of the issue to debug                   |
+| `namespace`| No       | —       | Namespace to focus the investigation on                              |
+| `model`    | No       | env var | Override `OPENCODE_MODEL` for this run                               |
+| `timeout`  | No       | `300`   | Max execution time in seconds (max: 900)                             |
+| `readOnly` | No       | `true`  | When false, the agent can perform remediation actions on the cluster |
 
 ## Tool Reference
 
@@ -192,7 +261,7 @@ All HTTP modes expose `GET /healthz` which verifies connectivity to the Kubernet
 | `getResourceHistory`  | Recent events and changes for a resource           | `kind`\*, `name`\*, `namespace`, `hours`           |
 | `validateManifest`    | Dry-run validation of YAML/JSON manifests          | `manifest`\*, `format`, `strict`                   |
 
-### Kubernetes — Write Tools (7)
+### Kubernetes — Write Tools (8)
 
 Disabled when `--read-only` is set.
 
@@ -205,6 +274,7 @@ Disabled when `--read-only` is set.
 | `scaleResource`      | Scale a workload's replica count          | `kind`\*, `name`\*, `namespace`\*, `replicas`\*   |
 | `execInPod`          | Execute a command in a pod container      | `name`\*, `namespace`\*, `command`\*, `container` |
 | `switchContext`      | Switch the active kubeconfig context      | `context`\*                                       |
+| `agentDebug`         | Autonomous AI debugging agent (requires opencode + LLM env vars) | `prompt`\*, `namespace`, `model`, `timeout`, `readOnly` |
 
 ### Helm — Read-Only Tools (4)
 
@@ -317,7 +387,7 @@ The Docker image runs with a minimal attack surface:
 
 ### Read-Only Mode
 
-Use `--read-only` to guarantee no cluster state changes. This disables all 12 write tools (7 Kubernetes + 5 Helm) while keeping all 31 read-only tools available.
+Use `--read-only` to guarantee no cluster state changes. This disables all 13 write tools (8 Kubernetes + 5 Helm) while keeping all 31 read-only tools available.
 
 ### RBAC
 
@@ -349,7 +419,7 @@ For write operations, create a separate ClusterRole with the necessary verbs and
 │   ├── .golangci.yml        # Linter configuration
 │   ├── tools/               # MCP tool schema definitions
 │   ├── handlers/            # Tool request handlers
-│   └── pkg/                 # Client libraries (k8s, helm)
+│   └── pkg/                 # Client libraries (k8s, helm, agent)
 ├── docker-compose.yaml      # Local development
 ├── Makefile                 # Build, test, lint, format, deploy
 └── redeploy.sh              # Build + deploy script

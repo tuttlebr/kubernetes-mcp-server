@@ -21,6 +21,7 @@ import (
 	"time"
 
 	"github.com/reza-gholizade/k8s-mcp-server/handlers"
+	"github.com/reza-gholizade/k8s-mcp-server/pkg/agent"
 	"github.com/reza-gholizade/k8s-mcp-server/pkg/helm"
 	"github.com/reza-gholizade/k8s-mcp-server/pkg/k8s"
 	"github.com/reza-gholizade/k8s-mcp-server/tools"
@@ -134,6 +135,18 @@ func main() {
 		return
 	}
 
+	// Create agent client (optional — only if OPENCODE_BASE_URL is configured)
+	var agentClient *agent.Client
+	if os.Getenv("OPENCODE_BASE_URL") != "" {
+		agentClient, err = agent.NewClient(client.KubeconfigPath())
+		if err != nil {
+			fmt.Printf("Warning: Failed to create agent client: %v\n", err)
+			fmt.Println("Agent debugging tool will not be available")
+		} else {
+			fmt.Println("Agent debugging enabled (opencode integration)")
+		}
+	}
+
 	// Register Kubernetes tools
 	if !noK8s {
 		s.AddTool(tools.GetAPIResourcesTool(), handlers.GetAPIResources(client))
@@ -194,6 +207,11 @@ func main() {
 
 			// Kubectl Command Pipeline (Write)
 			s.AddTool(tools.RunKubectlCommandTool(), handlers.RunKubectlCommand(client))
+
+			// Agent Debugging (Write — requires opencode CLI and env vars)
+			if agentClient != nil {
+				s.AddTool(tools.AgentDebugTool(), handlers.AgentDebug(agentClient))
+			}
 		}
 	}
 
