@@ -1,6 +1,7 @@
 package k8s
 
 import (
+	"bytes"
 	"encoding/base64"
 	"strings"
 	"testing"
@@ -24,17 +25,29 @@ func TestSanitizeResource_SecretRedaction(t *testing.T) {
 
 	result := SanitizeResource(content)
 
-	data := result["data"].(map[string]interface{})
+	data, ok := result["data"].(map[string]interface{})
+	if !ok {
+		t.Fatal("result[\"data\"] is not map[string]interface{}")
+	}
 	for key, val := range data {
-		s := val.(string)
+		s, ok := val.(string)
+		if !ok {
+			t.Fatalf("data[%s] is not a string", key)
+		}
 		if !strings.HasPrefix(s, "[REDACTED") {
 			t.Errorf("Secret data[%s] was not redacted: %s", key, s)
 		}
 	}
 
-	stringData := result["stringData"].(map[string]interface{})
+	stringData, ok := result["stringData"].(map[string]interface{})
+	if !ok {
+		t.Fatal("result[\"stringData\"] is not map[string]interface{}")
+	}
 	for key, val := range stringData {
-		s := val.(string)
+		s, ok := val.(string)
+		if !ok {
+			t.Fatalf("stringData[%s] is not a string", key)
+		}
 		if !strings.HasPrefix(s, "[REDACTED") {
 			t.Errorf("Secret stringData[%s] was not redacted: %s", key, s)
 		}
@@ -58,7 +71,10 @@ func TestSanitizeResource_ConfigMapBinaryData(t *testing.T) {
 	result := SanitizeResource(content)
 
 	// binaryData should be redacted
-	bd := result["binaryData"].(map[string]interface{})
+	bd, ok := result["binaryData"].(map[string]interface{})
+	if !ok {
+		t.Fatal("result[\"binaryData\"] is not map[string]interface{}")
+	}
 	s := bd["cert.pem"].(string)
 	if !strings.HasPrefix(s, "[REDACTED") {
 		t.Errorf("ConfigMap binaryData was not redacted: %s", s)
@@ -210,7 +226,7 @@ func TestSanitizeText_Truncation(t *testing.T) {
 
 func TestTruncateJSON(t *testing.T) {
 	small := []byte(`{"key":"value"}`)
-	if string(TruncateJSON(small)) != string(small) {
+	if !bytes.Equal(TruncateJSON(small), small) {
 		t.Error("small JSON was incorrectly truncated")
 	}
 
@@ -244,15 +260,12 @@ func TestLooksLikeText(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			got := looksLikeText(tt.input)
 			if got != tt.expect {
-				t.Errorf("looksLikeText(%q) = %v, want %v", tt.input[:min(len(tt.input), 40)], got, tt.expect)
+				preview := tt.input
+				if len(preview) > 40 {
+					preview = preview[:40]
+				}
+				t.Errorf("looksLikeText(%q) = %v, want %v", preview, got, tt.expect)
 			}
 		})
 	}
-}
-
-func min(a, b int) int {
-	if a < b {
-		return a
-	}
-	return b
 }
