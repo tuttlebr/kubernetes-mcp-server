@@ -212,6 +212,46 @@ spec:
           emptyDir: {}
 
 ---
+apiVersion: cilium.io/v2
+kind: CiliumNetworkPolicy
+metadata:
+  name: k8s-mcp-server-egress
+  namespace: k8s-mcp-server
+  labels:
+    app: k8s-mcp-server
+spec:
+  endpointSelector:
+    matchLabels:
+      app: k8s-mcp-server
+  egress:
+    # Allow DNS resolution
+    - toEndpoints:
+        - matchLabels:
+            k8s:io.kubernetes.pod.namespace: kube-system
+            k8s-app: kube-dns
+      toPorts:
+        - ports:
+            - port: "53"
+              protocol: UDP
+            - port: "53"
+              protocol: TCP
+    # Allow access to Kubernetes API server
+    - toEntities:
+        - kube-apiserver
+    # Allow cluster-internal traffic (RFC 1918 ranges)
+    - toCIDR:
+        - 10.0.0.0/8
+        - 172.16.0.0/12
+        - 192.168.0.0/16
+    # Allow HTTPS egress to *.nvidia.com
+    - toFQDNs:
+        - matchPattern: "*.nvidia.com"
+      toPorts:
+        - ports:
+            - port: "443"
+              protocol: TCP
+
+---
 apiVersion: v1
 kind: Service
 metadata:

@@ -17,6 +17,6 @@ kubectl -n "$NAMESPACE" create secret generic "$SECRET_NAME" \
   --dry-run=client -o yaml | kubectl apply -f -
 
 kubectl -n "$NAMESPACE" rollout restart deployment/k8s-mcp-server
-kubectl -n "$NAMESPACE" rollout status deployment/k8s-mcp-server --timeout=60s
+kubectl -n "$NAMESPACE" rollout status deployment/k8s-mcp-server
 sleep 20
 kubectl -n "$NAMESPACE" get all -o wide
