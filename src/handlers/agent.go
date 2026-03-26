@@ -2,7 +2,6 @@ package handlers
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 
 	"github.com/mark3labs/mcp-go/mcp"
@@ -49,7 +48,7 @@ func AgentDebug(agentClient *agent.Client) func(ctx context.Context, request mcp
 			return nil, fmt.Errorf("agent debugging failed: %w", err)
 		}
 
-		jsonResponse, err := json.Marshal(result)
+		jsonResponse, err := marshalSafe(result)
 		if err != nil {
 			return nil, fmt.Errorf("failed to serialize agent response: %w", err)
 		}

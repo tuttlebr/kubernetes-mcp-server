@@ -3,7 +3,6 @@ package handlers
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 
 	"github.com/reza-gholizade/k8s-mcp-server/pkg/k8s"
@@ -27,7 +26,7 @@ func GetGPUClusterOverview(client *k8s.Client) func(ctx context.Context, request
 			return nil, fmt.Errorf("failed to get GPU cluster overview: %w", err)
 		}
 
-		jsonResponse, err := json.Marshal(overview)
+		jsonResponse, err := marshalSafe(overview)
 		if err != nil {
 			return nil, fmt.Errorf("failed to serialize response: %w", err)
 		}
@@ -59,7 +58,7 @@ func DiagnoseGPUScheduling(client *k8s.Client) func(ctx context.Context, request
 			return nil, fmt.Errorf("failed to diagnose GPU scheduling for pod '%s': %w", podName, err)
 		}
 
-		jsonResponse, err := json.Marshal(diagnosis)
+		jsonResponse, err := marshalSafe(diagnosis)
 		if err != nil {
 			return nil, fmt.Errorf("failed to serialize response: %w", err)
 		}
@@ -95,7 +94,7 @@ func GetGPUOperatorHealth(client *k8s.Client) func(ctx context.Context, request 
 			return nil, fmt.Errorf("failed to get GPU operator health: %w", err)
 		}
 
-		jsonResponse, err := json.Marshal(health)
+		jsonResponse, err := marshalSafe(health)
 		if err != nil {
 			return nil, fmt.Errorf("failed to serialize response: %w", err)
 		}
@@ -128,7 +127,7 @@ func RemediateGPUIssue(client *k8s.Client) func(ctx context.Context, request mcp
 			return nil, fmt.Errorf("failed to remediate GPU issue (action: %s): %w", action, err)
 		}
 
-		jsonResponse, err := json.Marshal(result)
+		jsonResponse, err := marshalSafe(result)
 		if err != nil {
 			return nil, fmt.Errorf("failed to serialize response: %w", err)
 		}

@@ -11,6 +11,16 @@ import (
 	"github.com/mark3labs/mcp-go/mcp"
 )
 
+// marshalSafe serializes a value to JSON and applies size truncation to
+// prevent oversized responses from being sent to the LLM.
+func marshalSafe(v interface{}) ([]byte, error) {
+	data, err := json.Marshal(v)
+	if err != nil {
+		return nil, err
+	}
+	return k8s.TruncateJSON(data), nil
+}
+
 // Helper functions for consistent parameter extraction
 func getStringArg(args map[string]interface{}, key string, defaultValue string) string {
 	if val, ok := args[key].(string); ok {
@@ -56,7 +66,7 @@ func GetAPIResources(client *k8s.Client) func(ctx context.Context, request mcp.C
 		}
 
 		// Serialize response to JSON
-		jsonResponse, err := json.Marshal(resources)
+		jsonResponse, err := marshalSafe(resources)
 		if err != nil {
 			return nil, fmt.Errorf("failed to serialize response: %w", err)
 		}
@@ -93,7 +103,7 @@ func ListResources(client *k8s.Client) func(ctx context.Context, request mcp.Cal
 		}
 
 		// Serialize response to JSON
-		jsonResponse, err := json.Marshal(resources)
+		jsonResponse, err := marshalSafe(resources)
 		if err != nil {
 			return nil, fmt.Errorf("failed to serialize response: %w", err)
 		}
@@ -130,7 +140,7 @@ func GetResources(client *k8s.Client) func(ctx context.Context, request mcp.Call
 			return nil, fmt.Errorf("failed to get resource '%s' of kind '%s': %w", name, kind, err)
 		}
 
-		jsonResponse, err := json.Marshal(resource)
+		jsonResponse, err := marshalSafe(resource)
 		if err != nil {
 			return nil, fmt.Errorf("failed to serialize response: %w", err)
 		}
@@ -169,7 +179,7 @@ func DescribeResources(client *k8s.Client) func(ctx context.Context, request mcp
 		}
 
 		// Serialize response to JSON
-		jsonResponse, err := json.Marshal(resourceDescription)
+		jsonResponse, err := marshalSafe(resourceDescription)
 		if err != nil {
 			return nil, fmt.Errorf("failed to serialize response: %w", err)
 		}
@@ -232,7 +242,7 @@ func GetNodeMetrics(client *k8s.Client) func(ctx context.Context, request mcp.Ca
 			return nil, fmt.Errorf("failed to get metrics for node '%s': %w", name, err)
 		}
 
-		jsonResponse, err := json.Marshal(resourceUsage)
+		jsonResponse, err := marshalSafe(resourceUsage)
 		if err != nil {
 			return nil, fmt.Errorf("failed to serialize response: %w", err)
 		}
@@ -267,7 +277,7 @@ func GetPodMetrics(client *k8s.Client) func(ctx context.Context, request mcp.Cal
 			return nil, fmt.Errorf("failed to get metrics for pod '%s' in namespace '%s': %w", podName, namespace, err)
 		}
 
-		jsonResponse, err := json.Marshal(metrics)
+		jsonResponse, err := marshalSafe(metrics)
 		if err != nil {
 			return nil, fmt.Errorf("failed to serialize metrics response: %w", err)
 		}
@@ -294,7 +304,7 @@ func GetEvents(client *k8s.Client) func(ctx context.Context, request mcp.CallToo
 			return nil, fmt.Errorf("failed to get events: %w", err)
 		}
 
-		jsonResponse, err := json.Marshal(events)
+		jsonResponse, err := marshalSafe(events)
 		if err != nil {
 			return nil, fmt.Errorf("failed to serialize events response: %w", err)
 		}
@@ -326,7 +336,7 @@ func CreateOrUpdateResourceJSON(client *k8s.Client) func(ctx context.Context, re
 			return nil, fmt.Errorf("failed to create or update resource: %w", err)
 		}
 
-		jsonResponse, err := json.Marshal(resource)
+		jsonResponse, err := marshalSafe(resource)
 		if err != nil {
 			return nil, fmt.Errorf("failed to serialize response: %w", err)
 		}
@@ -359,7 +369,7 @@ func CreateOrUpdateResourceYAML(client *k8s.Client) func(ctx context.Context, re
 			return nil, fmt.Errorf("failed to create or update resource from YAML: %w", err)
 		}
 
-		jsonResponse, err := json.Marshal(resource)
+		jsonResponse, err := marshalSafe(resource)
 		if err != nil {
 			return nil, fmt.Errorf("failed to serialize response: %w", err)
 		}
@@ -416,7 +426,7 @@ func GetIngresses(client *k8s.Client) func(ctx context.Context, request mcp.Call
 			return nil, fmt.Errorf("failed to get ingress resources: %w", err)
 		}
 
-		jsonResponse, err := json.Marshal(ingresses)
+		jsonResponse, err := marshalSafe(ingresses)
 		if err != nil {
 			return nil, fmt.Errorf("failed to serialize response: %w", err)
 		}
@@ -447,7 +457,7 @@ func RolloutRestart(client *k8s.Client) func(ctx context.Context, request mcp.Ca
 			return nil, fmt.Errorf("failed to rollout restart resource: %w", err)
 		}
 
-		jsonResponse, err := json.Marshal(result)
+		jsonResponse, err := marshalSafe(result)
 		if err != nil {
 			return nil, fmt.Errorf("failed to serialize response: %w", err)
 		}
@@ -513,7 +523,7 @@ func GetResourceDiff(client *k8s.Client) func(ctx context.Context, request mcp.C
 			return nil, fmt.Errorf("failed to get resource diff: %w", err)
 		}
 
-		jsonResponse, err := json.Marshal(diff)
+		jsonResponse, err := marshalSafe(diff)
 		if err != nil {
 			return nil, fmt.Errorf("failed to serialize response: %w", err)
 		}
@@ -543,7 +553,7 @@ func GetNamespaceResources(client *k8s.Client) func(ctx context.Context, request
 			return nil, fmt.Errorf("failed to get namespace resources: %w", err)
 		}
 
-		jsonResponse, err := json.Marshal(resources)
+		jsonResponse, err := marshalSafe(resources)
 		if err != nil {
 			return nil, fmt.Errorf("failed to serialize response: %w", err)
 		}
@@ -578,7 +588,7 @@ func GetResourceOwners(client *k8s.Client) func(ctx context.Context, request mcp
 			return nil, fmt.Errorf("failed to get resource owners: %w", err)
 		}
 
-		jsonResponse, err := json.Marshal(owners)
+		jsonResponse, err := marshalSafe(owners)
 		if err != nil {
 			return nil, fmt.Errorf("failed to serialize response: %w", err)
 		}
@@ -605,7 +615,7 @@ func GetClusterHealth(client *k8s.Client) func(ctx context.Context, request mcp.
 			return nil, fmt.Errorf("failed to get cluster health: %w", err)
 		}
 
-		jsonResponse, err := json.Marshal(health)
+		jsonResponse, err := marshalSafe(health)
 		if err != nil {
 			return nil, fmt.Errorf("failed to serialize response: %w", err)
 		}
@@ -630,7 +640,7 @@ func GetResourceQuotas(client *k8s.Client) func(ctx context.Context, request mcp
 			return nil, fmt.Errorf("failed to get resource quotas: %w", err)
 		}
 
-		jsonResponse, err := json.Marshal(quotas)
+		jsonResponse, err := marshalSafe(quotas)
 		if err != nil {
 			return nil, fmt.Errorf("failed to serialize response: %w", err)
 		}
@@ -654,7 +664,7 @@ func GetLimitRanges(client *k8s.Client) func(ctx context.Context, request mcp.Ca
 			return nil, fmt.Errorf("failed to get limit ranges: %w", err)
 		}
 
-		jsonResponse, err := json.Marshal(limitRanges)
+		jsonResponse, err := marshalSafe(limitRanges)
 		if err != nil {
 			return nil, fmt.Errorf("failed to serialize response: %w", err)
 		}
@@ -690,7 +700,7 @@ func GetTopPods(client *k8s.Client) func(ctx context.Context, request mcp.CallTo
 			return nil, fmt.Errorf("failed to get top pods: %w", err)
 		}
 
-		jsonResponse, err := json.Marshal(topPods)
+		jsonResponse, err := marshalSafe(topPods)
 		if err != nil {
 			return nil, fmt.Errorf("failed to serialize response: %w", err)
 		}
@@ -715,7 +725,7 @@ func GetTopNodes(client *k8s.Client) func(ctx context.Context, request mcp.CallT
 			return nil, fmt.Errorf("failed to get top nodes: %w", err)
 		}
 
-		jsonResponse, err := json.Marshal(topNodes)
+		jsonResponse, err := marshalSafe(topNodes)
 		if err != nil {
 			return nil, fmt.Errorf("failed to serialize response: %w", err)
 		}
@@ -762,7 +772,7 @@ func GetPodDebugInfo(client *k8s.Client) func(ctx context.Context, request mcp.C
 			return nil, fmt.Errorf("failed to get pod debug info: %w", err)
 		}
 
-		jsonResponse, err := json.Marshal(debugInfo)
+		jsonResponse, err := marshalSafe(debugInfo)
 		if err != nil {
 			return nil, fmt.Errorf("failed to serialize response: %w", err)
 		}
@@ -796,7 +806,7 @@ func GetServiceEndpoints(client *k8s.Client) func(ctx context.Context, request m
 			return nil, fmt.Errorf("failed to get service endpoints: %w", err)
 		}
 
-		jsonResponse, err := json.Marshal(endpoints)
+		jsonResponse, err := marshalSafe(endpoints)
 		if err != nil {
 			return nil, fmt.Errorf("failed to serialize response: %w", err)
 		}
@@ -826,7 +836,7 @@ func GetNetworkPolicies(client *k8s.Client) func(ctx context.Context, request mc
 			return nil, fmt.Errorf("failed to get network policies: %w", err)
 		}
 
-		jsonResponse, err := json.Marshal(policies)
+		jsonResponse, err := marshalSafe(policies)
 		if err != nil {
 			return nil, fmt.Errorf("failed to serialize response: %w", err)
 		}
@@ -860,7 +870,7 @@ func GetSecurityContext(client *k8s.Client) func(ctx context.Context, request mc
 			return nil, fmt.Errorf("failed to get security context: %w", err)
 		}
 
-		jsonResponse, err := json.Marshal(securityContext)
+		jsonResponse, err := marshalSafe(securityContext)
 		if err != nil {
 			return nil, fmt.Errorf("failed to serialize response: %w", err)
 		}
@@ -905,7 +915,7 @@ func GetResourceHistory(client *k8s.Client) func(ctx context.Context, request mc
 			return nil, fmt.Errorf("failed to get resource history: %w", err)
 		}
 
-		jsonResponse, err := json.Marshal(history)
+		jsonResponse, err := marshalSafe(history)
 		if err != nil {
 			return nil, fmt.Errorf("failed to serialize response: %w", err)
 		}
@@ -935,7 +945,7 @@ func ValidateManifest(client *k8s.Client) func(ctx context.Context, request mcp.
 			return nil, fmt.Errorf("failed to validate manifest: %w", err)
 		}
 
-		jsonResponse, err := json.Marshal(validation)
+		jsonResponse, err := marshalSafe(validation)
 		if err != nil {
 			return nil, fmt.Errorf("failed to serialize response: %w", err)
 		}
@@ -978,7 +988,7 @@ func ExecInPod(client *k8s.Client) func(ctx context.Context, request mcp.CallToo
 			return nil, fmt.Errorf("failed to execute command in pod: %w", err)
 		}
 
-		jsonResponse, err := json.Marshal(result)
+		jsonResponse, err := marshalSafe(result)
 		if err != nil {
 			return nil, fmt.Errorf("failed to serialize response: %w", err)
 		}
@@ -1026,7 +1036,7 @@ func PortForward(client *k8s.Client) func(ctx context.Context, request mcp.CallT
 			return nil, fmt.Errorf("failed to set up port forwarding: %w", err)
 		}
 
-		jsonResponse, err := json.Marshal(result)
+		jsonResponse, err := marshalSafe(result)
 		if err != nil {
 			return nil, fmt.Errorf("failed to serialize response: %w", err)
 		}
@@ -1070,7 +1080,7 @@ func CopyFromPod(client *k8s.Client) func(ctx context.Context, request mcp.CallT
 			return nil, fmt.Errorf("failed to copy from pod: %w", err)
 		}
 
-		jsonResponse, err := json.Marshal(result)
+		jsonResponse, err := marshalSafe(result)
 		if err != nil {
 			return nil, fmt.Errorf("failed to serialize response: %w", err)
 		}
@@ -1114,7 +1124,7 @@ func CopyToPod(client *k8s.Client) func(ctx context.Context, request mcp.CallToo
 			return nil, fmt.Errorf("failed to copy to pod: %w", err)
 		}
 
-		jsonResponse, err := json.Marshal(result)
+		jsonResponse, err := marshalSafe(result)
 		if err != nil {
 			return nil, fmt.Errorf("failed to serialize response: %w", err)
 		}
@@ -1137,7 +1147,7 @@ func ListNamespaces(client *k8s.Client) func(ctx context.Context, request mcp.Ca
 			return nil, fmt.Errorf("failed to list namespaces: %w", err)
 		}
 
-		jsonResponse, err := json.Marshal(namespaces)
+		jsonResponse, err := marshalSafe(namespaces)
 		if err != nil {
 			return nil, fmt.Errorf("failed to serialize response: %w", err)
 		}
@@ -1173,7 +1183,7 @@ func GetRolloutStatus(client *k8s.Client) func(ctx context.Context, request mcp.
 			return nil, fmt.Errorf("failed to get rollout status: %w", err)
 		}
 
-		jsonResponse, err := json.Marshal(status)
+		jsonResponse, err := marshalSafe(status)
 		if err != nil {
 			return nil, fmt.Errorf("failed to serialize response: %w", err)
 		}
@@ -1223,7 +1233,7 @@ func ScaleResource(client *k8s.Client) func(ctx context.Context, request mcp.Cal
 			return nil, fmt.Errorf("failed to scale resource: %w", err)
 		}
 
-		jsonResponse, err := json.Marshal(result)
+		jsonResponse, err := marshalSafe(result)
 		if err != nil {
 			return nil, fmt.Errorf("failed to serialize response: %w", err)
 		}
@@ -1246,7 +1256,7 @@ func GetClusterSummary(client *k8s.Client) func(ctx context.Context, request mcp
 			return nil, fmt.Errorf("failed to get cluster summary: %w", err)
 		}
 
-		jsonResponse, err := json.Marshal(summary)
+		jsonResponse, err := marshalSafe(summary)
 		if err != nil {
 			return nil, fmt.Errorf("failed to serialize response: %w", err)
 		}
@@ -1262,7 +1272,7 @@ func ListContexts(client *k8s.Client) func(ctx context.Context, request mcp.Call
 			return nil, fmt.Errorf("failed to list contexts: %w", err)
 		}
 
-		jsonResponse, err := json.Marshal(contexts)
+		jsonResponse, err := marshalSafe(contexts)
 		if err != nil {
 			return nil, fmt.Errorf("failed to serialize response: %w", err)
 		}
@@ -1300,7 +1310,7 @@ func RunKubectlCommand(client *k8s.Client) func(ctx context.Context, request mcp
 			return nil, fmt.Errorf("failed to run kubectl command: %w", err)
 		}
 
-		jsonResponse, err := json.Marshal(result)
+		jsonResponse, err := marshalSafe(result)
 		if err != nil {
 			return nil, fmt.Errorf("failed to serialize response: %w", err)
 		}
@@ -1326,7 +1336,7 @@ func SwitchContext(client *k8s.Client) func(ctx context.Context, request mcp.Cal
 			return nil, fmt.Errorf("failed to switch context: %w", err)
 		}
 
-		jsonResponse, err := json.Marshal(result)
+		jsonResponse, err := marshalSafe(result)
 		if err != nil {
 			return nil, fmt.Errorf("failed to serialize response: %w", err)
 		}

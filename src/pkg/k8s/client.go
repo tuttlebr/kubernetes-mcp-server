@@ -177,11 +177,11 @@ func (c *Client) RunKubectlCommand(ctx context.Context, command string, timeoutS
 
 	result := map[string]interface{}{
 		"command": trimmed,
-		"stdout":  stdout.String(),
+		"stdout":  SanitizeText(stdout.String()),
 	}
 
 	if stderr.Len() > 0 {
-		result["stderr"] = stderr.String()
+		result["stderr"] = SanitizeText(stderr.String())
 	}
 
 	if err != nil {
@@ -284,11 +284,6 @@ func (c *Client) ListResources(ctx context.Context, kind, namespace, labelSelect
 	var resources []map[string]interface{}
 	for _, item := range list.Items {
 		content := item.UnstructuredContent()
-		// Remove verbose metadata fields that add noise without value
-		if metadata, ok := content["metadata"].(map[string]interface{}); ok {
-			delete(metadata, "managedFields")
-			delete(metadata, "selfLink")
-		}
 		resources = append(resources, SanitizeResource(content))
 	}
 
@@ -865,16 +860,14 @@ func (c *Client) RolloutRestart(ctx context.Context, kind, name, namespace strin
 
 // GetResourceYAML exports a resource as YAML string
 func (c *Client) GetResourceYAML(ctx context.Context, kind, name, namespace string) (string, error) {
-	// Get the resource first
+	// Get the resource first (already sanitized by GetResource → SanitizeResource)
 	resource, err := c.GetResource(ctx, kind, name, namespace)
 	if err != nil {
 		return "", fmt.Errorf("failed to get resource: %w", err)
 	}
 
-	// Remove managed fields for cleaner output
+	// Remove extra metadata noise for cleaner YAML
 	if metadata, ok := resource["metadata"].(map[string]interface{}); ok {
-		delete(metadata, "managedFields")
-		delete(metadata, "selfLink")
 		delete(metadata, "uid")
 		delete(metadata, "resourceVersion")
 	}
@@ -2370,8 +2363,8 @@ func (c *Client) ExecInPod(ctx context.Context, name, namespace, command, contai
 		"namespace": namespace,
 		"container": container,
 		"command":   command,
-		"stdout":    stdout.String(),
-		"stderr":    stderr.String(),
+		"stdout":    SanitizeText(stdout.String()),
+		"stderr":    SanitizeText(stderr.String()),
 	}
 
 	if err != nil {

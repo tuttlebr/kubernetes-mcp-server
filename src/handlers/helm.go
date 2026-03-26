@@ -2,7 +2,6 @@ package handlers
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"strconv"
 
@@ -44,7 +43,7 @@ func HelmInstall(client *helm.Client) func(ctx context.Context, request mcp.Call
 			return nil, fmt.Errorf("failed to install chart: %w", err)
 		}
 
-		jsonResponse, err := json.Marshal(release)
+		jsonResponse, err := marshalSafe(release)
 		if err != nil {
 			return nil, fmt.Errorf("failed to serialize response: %w", err)
 		}
@@ -85,7 +84,7 @@ func HelmUpgrade(client *helm.Client) func(ctx context.Context, request mcp.Call
 			return nil, fmt.Errorf("failed to upgrade chart: %w", err)
 		}
 
-		jsonResponse, err := json.Marshal(release)
+		jsonResponse, err := marshalSafe(release)
 		if err != nil {
 			return nil, fmt.Errorf("failed to serialize response: %w", err)
 		}
@@ -119,7 +118,7 @@ func HelmUninstall(client *helm.Client) func(ctx context.Context, request mcp.Ca
 			"message": fmt.Sprintf("Successfully uninstalled release '%s' from namespace '%s'", releaseName, namespace),
 		}
 
-		jsonResponse, err := json.Marshal(response)
+		jsonResponse, err := marshalSafe(response)
 		if err != nil {
 			return nil, fmt.Errorf("failed to serialize response: %w", err)
 		}
@@ -143,7 +142,7 @@ func HelmList(client *helm.Client) func(ctx context.Context, request mcp.CallToo
 			return nil, fmt.Errorf("failed to list releases: %w", err)
 		}
 
-		jsonResponse, err := json.Marshal(releases)
+		jsonResponse, err := marshalSafe(releases)
 		if err != nil {
 			return nil, fmt.Errorf("failed to serialize response: %w", err)
 		}
@@ -172,7 +171,7 @@ func HelmGet(client *helm.Client) func(ctx context.Context, request mcp.CallTool
 			return nil, fmt.Errorf("failed to get release: %w", err)
 		}
 
-		jsonResponse, err := json.Marshal(release)
+		jsonResponse, err := marshalSafe(release)
 		if err != nil {
 			return nil, fmt.Errorf("failed to serialize response: %w", err)
 		}
@@ -201,7 +200,7 @@ func HelmHistory(client *helm.Client) func(ctx context.Context, request mcp.Call
 			return nil, fmt.Errorf("failed to get release history: %w", err)
 		}
 
-		jsonResponse, err := json.Marshal(history)
+		jsonResponse, err := marshalSafe(history)
 		if err != nil {
 			return nil, fmt.Errorf("failed to serialize response: %w", err)
 		}
@@ -243,7 +242,7 @@ func HelmRollback(client *helm.Client) func(ctx context.Context, request mcp.Cal
 			"revision": revision,
 		}
 
-		jsonResponse, err := json.Marshal(response)
+		jsonResponse, err := marshalSafe(response)
 		if err != nil {
 			return nil, fmt.Errorf("failed to serialize response: %w", err)
 		}
@@ -280,7 +279,7 @@ func HelmRepoAdd(client *helm.Client) func(ctx context.Context, request mcp.Call
 			"message": fmt.Sprintf("Successfully added repository '%s' with URL '%s'", repoName, repoURL),
 		}
 
-		jsonResponse, err := json.Marshal(response)
+		jsonResponse, err := marshalSafe(response)
 		if err != nil {
 			return nil, fmt.Errorf("failed to serialize response: %w", err)
 		}
@@ -296,7 +295,7 @@ func HelmRepoList(client *helm.Client) func(ctx context.Context, request mcp.Cal
 			return nil, fmt.Errorf("failed to list repositories: %w", err)
 		}
 
-		jsonResponse, err := json.Marshal(repos)
+		jsonResponse, err := marshalSafe(repos)
 		if err != nil {
 			return nil, fmt.Errorf("failed to serialize response: %w", err)
 		}
