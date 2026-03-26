@@ -1001,11 +1001,11 @@ func (c *Client) checkGPUCRDs(ctx context.Context) map[string]interface{} {
 
 	gpuCRDs := []string{}
 	for _, resourceList := range resourceLists {
-		for _, resource := range resourceList.APIResources {
-			nameLower := strings.ToLower(resource.Name + " " + resourceList.GroupVersion)
+		for i := range resourceList.APIResources {
+			nameLower := strings.ToLower(resourceList.APIResources[i].Name + " " + resourceList.GroupVersion)
 			if strings.Contains(nameLower, "gpu") || strings.Contains(nameLower, "nvidia") ||
 				strings.Contains(nameLower, "dcgm") || strings.Contains(nameLower, "nfd") {
-				gpuCRDs = append(gpuCRDs, fmt.Sprintf("%s (%s)", resource.Name, resourceList.GroupVersion))
+				gpuCRDs = append(gpuCRDs, fmt.Sprintf("%s (%s)", resourceList.APIResources[i].Name, resourceList.GroupVersion))
 			}
 		}
 	}

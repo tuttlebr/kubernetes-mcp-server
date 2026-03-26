@@ -8,7 +8,7 @@ import "fmt"
 //   - Preserves the key names so the LLM knows which fields exist
 func SanitizeResource(content map[string]interface{}) map[string]interface{} {
 	if content == nil {
-		return content
+		return nil
 	}
 
 	kind, _ := content["kind"].(string)
