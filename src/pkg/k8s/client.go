@@ -1179,7 +1179,11 @@ func (c *Client) GetClusterHealth(ctx context.Context, includeMetrics, includeEv
 						result["healthy"] = false
 					}
 				}
-				if condition.Status != corev1.ConditionTrue && condition.Type != corev1.NodeReady {
+				// For negative conditions (MemoryPressure, DiskPressure, etc.),
+				// only report when True (active problem) or Unknown (indeterminate).
+				// False means healthy and should not be listed as a condition.
+				if condition.Type != corev1.NodeReady &&
+					(condition.Status == corev1.ConditionTrue || condition.Status == corev1.ConditionUnknown) {
 					nodeConditions = append(nodeConditions,
 						fmt.Sprintf("%s: %s", condition.Type, condition.Message))
 				}
@@ -1251,36 +1255,148 @@ func (c *Client) GetClusterHealth(ctx context.Context, includeMetrics, includeEv
 		"components": cpComponents,
 	}
 
-	// Get recent warning/error events if requested
+	// Get recent warning/error events if requested.
+	// Events are filtered to exclude stale references to pods from old
+	// ReplicaSet generations (e.g. after a rollout restart) and deduplicated.
 	if includeEvents {
-		events, err := c.clientset.CoreV1().Events("").List(ctx, metav1.ListOptions{
-			FieldSelector: "type!=Normal",
-		})
-		if err == nil {
-			recentEvents := []map[string]interface{}{}
-			cutoff := time.Now().Add(-30 * time.Minute)
-
-			for i := range events.Items {
-				event := &events.Items[i]
-				if event.LastTimestamp.After(cutoff) {
-					recentEvents = append(recentEvents, map[string]interface{}{
-						"type":      event.Type,
-						"reason":    event.Reason,
-						"message":   event.Message,
-						"object":    fmt.Sprintf("%s/%s", event.InvolvedObject.Kind, event.InvolvedObject.Name),
-						"namespace": event.Namespace,
-						"timestamp": event.LastTimestamp.Time,
-					})
-				}
-			}
-
-			if len(recentEvents) > 0 {
-				result["recentEvents"] = recentEvents
-			}
+		recentEvents := c.filterRecentEvents(ctx, 30*time.Minute, 0)
+		if len(recentEvents) > 0 {
+			result["recentEvents"] = recentEvents
 		}
 	}
 
 	return result, nil
+}
+
+// eventTimestamp returns the most relevant timestamp for an event,
+// preferring LastTimestamp, then EventTime, then FirstTimestamp.
+func eventTimestamp(ev *corev1.Event) time.Time {
+	if !ev.LastTimestamp.IsZero() {
+		return ev.LastTimestamp.Time
+	}
+	if !ev.EventTime.IsZero() {
+		return ev.EventTime.Time
+	}
+	return ev.FirstTimestamp.Time
+}
+
+// getActivePodUIDs returns a set of UIDs for pods that currently exist.
+// Events referencing pods not in this set are from old ReplicaSet generations
+// and should be treated as stale.
+func (c *Client) getActivePodUIDs(ctx context.Context) map[types.UID]bool {
+	uids := make(map[types.UID]bool)
+	pods, err := c.clientset.CoreV1().Pods("").List(ctx, metav1.ListOptions{})
+	if err != nil {
+		return uids
+	}
+	for i := range pods.Items {
+		uids[pods.Items[i].UID] = true
+	}
+	return uids
+}
+
+// filterRecentEvents returns non-Normal events from the last `window`,
+// excluding events whose involved Pod no longer exists (stale events from
+// previous ReplicaSet generations after rollout restarts).  Results are
+// deduplicated by (namespace, involved object, reason) and sorted by
+// aggregate event count descending.
+func (c *Client) filterRecentEvents(ctx context.Context, window time.Duration, maxResults int) []map[string]interface{} {
+	allEvents, err := c.clientset.CoreV1().Events("").List(ctx, metav1.ListOptions{
+		FieldSelector: "type!=Normal",
+	})
+	if err != nil {
+		return nil
+	}
+
+	activePodUIDs := c.getActivePodUIDs(ctx)
+	cutoff := time.Now().Add(-window)
+
+	type eventKey struct {
+		namespace string
+		object    string
+		reason    string
+	}
+	type dedupedEvent struct {
+		evType    string
+		reason    string
+		message   string
+		object    string
+		namespace string
+		count     int32
+		timestamp time.Time
+	}
+	grouped := make(map[eventKey]*dedupedEvent)
+
+	for i := range allEvents.Items {
+		ev := &allEvents.Items[i]
+		ts := eventTimestamp(ev)
+		if ts.IsZero() || !ts.After(cutoff) {
+			continue
+		}
+
+		// Discard events for pods that no longer exist (old generations)
+		if ev.InvolvedObject.Kind == "Pod" {
+			if _, exists := activePodUIDs[ev.InvolvedObject.UID]; !exists {
+				continue
+			}
+		}
+
+		key := eventKey{
+			namespace: ev.Namespace,
+			object:    fmt.Sprintf("%s/%s", ev.InvolvedObject.Kind, ev.InvolvedObject.Name),
+			reason:    ev.Reason,
+		}
+
+		count := ev.Count
+		if count == 0 {
+			count = 1
+		}
+
+		if existing, ok := grouped[key]; ok {
+			existing.count += count
+			if ts.After(existing.timestamp) {
+				existing.timestamp = ts
+				existing.message = ev.Message
+			}
+		} else {
+			grouped[key] = &dedupedEvent{
+				evType:    ev.Type,
+				reason:    ev.Reason,
+				message:   ev.Message,
+				object:    key.object,
+				namespace: key.namespace,
+				count:     count,
+				timestamp: ts,
+			}
+		}
+	}
+
+	// Collect and sort by count descending (most frequent issues first)
+	entries := make([]*dedupedEvent, 0, len(grouped))
+	for _, e := range grouped {
+		entries = append(entries, e)
+	}
+	sort.Slice(entries, func(i, j int) bool {
+		return entries[i].count > entries[j].count
+	})
+
+	if maxResults > 0 && len(entries) > maxResults {
+		entries = entries[:maxResults]
+	}
+
+	result := make([]map[string]interface{}, len(entries))
+	for i, e := range entries {
+		result[i] = map[string]interface{}{
+			"type":      e.evType,
+			"reason":    e.reason,
+			"message":   e.message,
+			"object":    e.object,
+			"namespace": e.namespace,
+			"count":     e.count,
+			"timestamp": e.timestamp,
+		}
+	}
+	return result
 }
 
 // GetResourceQuotas lists resource quotas and usage
@@ -2871,35 +2987,10 @@ func (c *Client) GetClusterSummary(ctx context.Context, includeNamespaceDetails 
 	}
 	summary["controlPlane"] = cp
 
-	// --- Recent warning events (last 1 hour) ---
-	events, err := c.clientset.CoreV1().Events("").List(ctx, metav1.ListOptions{
-		FieldSelector: "type!=Normal",
-	})
-	if err == nil {
-		cutoff := time.Now().Add(-1 * time.Hour)
-		warnings := []map[string]interface{}{}
-		for i := range events.Items {
-			ev := &events.Items[i]
-			if ev.LastTimestamp.After(cutoff) {
-				warnings = append(warnings, map[string]interface{}{
-					"type":      ev.Type,
-					"reason":    ev.Reason,
-					"message":   ev.Message,
-					"object":    fmt.Sprintf("%s/%s", ev.InvolvedObject.Kind, ev.InvolvedObject.Name),
-					"namespace": ev.Namespace,
-					"count":     ev.Count,
-				})
-			}
-		}
-		if len(warnings) > 0 {
-			if len(warnings) > 50 {
-				summary["recentWarnings"] = warnings[:50]
-				summary["recentWarningsTruncated"] = true
-				summary["totalRecentWarnings"] = len(warnings)
-			} else {
-				summary["recentWarnings"] = warnings
-			}
-		}
+	// --- Recent warning events (last 1 hour, stale events filtered) ---
+	warnings := c.filterRecentEvents(ctx, 1*time.Hour, 50)
+	if len(warnings) > 0 {
+		summary["recentWarnings"] = warnings
 	}
 
 	return summary, nil
