@@ -527,12 +527,44 @@ func (c *Client) resolveKindName(kind string) string {
 	return kind
 }
 
+// FindResourceKind searches common workload and config kinds for a resource by
+// name and namespace. Returns the lowercase-plural kind if found, or an error.
+// Use this as a fallback when the caller-supplied kind doesn't match.
+func (c *Client) FindResourceKind(ctx context.Context, name, namespace string) (string, error) {
+	kinds := []string{
+		"deployments", "statefulsets", "daemonsets", "services",
+		"pods", "jobs", "cronjobs", "replicasets",
+		"configmaps", "secrets", "ingresses",
+	}
+	for _, k := range kinds {
+		if _, err := c.GetResource(ctx, k, name, namespace); err == nil {
+			return k, nil
+		}
+	}
+	return "", fmt.Errorf("resource %q not found under any common kind", name)
+}
+
 // DescribeResource retrieves detailed information about a resource including
 // related events, owner references, and conditions (similar to kubectl describe).
+// If the resource is not found under the specified kind, it falls back to
+// auto-detecting the kind via FindResourceKind.
 func (c *Client) DescribeResource(ctx context.Context, kind, name, namespace string) (map[string]interface{}, error) {
 	resource, err := c.GetResource(ctx, kind, name, namespace)
 	if err != nil {
-		return nil, err
+		// If not found with the specified kind, try auto-detecting
+		if errors.IsNotFound(err) {
+			if altKind, findErr := c.FindResourceKind(ctx, name, namespace); findErr == nil {
+				resource, err = c.GetResource(ctx, altKind, name, namespace)
+				if err != nil {
+					return nil, err
+				}
+				// Fall through with the auto-detected resource
+			} else {
+				return nil, err // Return original NotFound error
+			}
+		} else {
+			return nil, err
+		}
 	}
 
 	result := map[string]interface{}{
