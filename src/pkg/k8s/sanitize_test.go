@@ -75,13 +75,19 @@ func TestSanitizeResource_ConfigMapBinaryData(t *testing.T) {
 	if !ok {
 		t.Fatal("result[\"binaryData\"] is not map[string]interface{}")
 	}
-	s := bd["cert.pem"].(string)
+	s, ok := bd["cert.pem"].(string)
+	if !ok {
+		t.Fatal("binaryData[\"cert.pem\"] is not a string")
+	}
 	if !strings.HasPrefix(s, "[REDACTED") {
 		t.Errorf("ConfigMap binaryData was not redacted: %s", s)
 	}
 
 	// Regular data should be preserved
-	d := result["data"].(map[string]interface{})
+	d, ok := result["data"].(map[string]interface{})
+	if !ok {
+		t.Fatal("result[\"data\"] is not map[string]interface{}")
+	}
 	if d["config.yaml"] != "key: value" {
 		t.Error("ConfigMap data was incorrectly modified")
 	}
@@ -101,8 +107,14 @@ func TestSanitizeResource_LastAppliedConfigRemoved(t *testing.T) {
 
 	result := SanitizeResource(content)
 
-	meta := result["metadata"].(map[string]interface{})
-	annotations := meta["annotations"].(map[string]interface{})
+	meta, ok := result["metadata"].(map[string]interface{})
+	if !ok {
+		t.Fatal("result[\"metadata\"] is not map[string]interface{}")
+	}
+	annotations, ok := meta["annotations"].(map[string]interface{})
+	if !ok {
+		t.Fatal("meta[\"annotations\"] is not map[string]interface{}")
+	}
 
 	if _, exists := annotations["kubectl.kubernetes.io/last-applied-configuration"]; exists {
 		t.Error("last-applied-configuration annotation was not removed")
@@ -123,7 +135,10 @@ func TestSanitizeResource_ManagedFieldsRemoved(t *testing.T) {
 	}
 
 	result := SanitizeResource(content)
-	meta := result["metadata"].(map[string]interface{})
+	meta, ok := result["metadata"].(map[string]interface{})
+	if !ok {
+		t.Fatal("result[\"metadata\"] is not map[string]interface{}")
+	}
 
 	if _, exists := meta["managedFields"]; exists {
 		t.Error("managedFields was not removed")
