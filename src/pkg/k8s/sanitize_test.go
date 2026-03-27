@@ -172,16 +172,30 @@ func TestSanitizeResource_DeepBase64Detection(t *testing.T) {
 
 	result := SanitizeResource(content)
 
-	spec := result["spec"].(map[string]interface{})
-	if !strings.Contains(spec["tlsCert"].(string), "BASE64_DATA") {
+	spec, ok := result["spec"].(map[string]interface{})
+	if !ok {
+		t.Fatal("result[\"spec\"] is not map[string]interface{}")
+	}
+	tlsCert, ok := spec["tlsCert"].(string)
+	if !ok {
+		t.Fatal("spec[\"tlsCert\"] is not a string")
+	}
+	if !strings.Contains(tlsCert, "BASE64_DATA") {
 		t.Error("large base64 in spec.tlsCert was not detected")
 	}
 	if spec["name"] != "normal-string" {
 		t.Error("normal string was incorrectly modified")
 	}
 
-	nested := spec["nested"].(map[string]interface{})
-	if !strings.Contains(nested["caBundle"].(string), "BASE64_DATA") {
+	nested, ok := spec["nested"].(map[string]interface{})
+	if !ok {
+		t.Fatal("spec[\"nested\"] is not map[string]interface{}")
+	}
+	caBundle, ok := nested["caBundle"].(string)
+	if !ok {
+		t.Fatal("nested[\"caBundle\"] is not a string")
+	}
+	if !strings.Contains(caBundle, "BASE64_DATA") {
 		t.Error("large base64 in spec.nested.caBundle was not detected")
 	}
 }
@@ -199,7 +213,10 @@ func TestSanitizeResource_PreservesShortStrings(t *testing.T) {
 	}
 
 	result := SanitizeResource(content)
-	spec := result["spec"].(map[string]interface{})
+	spec, ok := result["spec"].(map[string]interface{})
+	if !ok {
+		t.Fatal("result[\"spec\"] is not map[string]interface{}")
+	}
 
 	if spec["clusterIP"] != "10.0.0.1" {
 		t.Error("short string clusterIP was incorrectly modified")
