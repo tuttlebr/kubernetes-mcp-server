@@ -1,3 +1,6 @@
+# Secrets / environment
+.env
+
 # Kubernetes credentials and discovery cache
 kube/config
 kube/cache/

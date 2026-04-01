@@ -259,6 +259,9 @@ func (c *Client) GetResource(ctx context.Context, kind, name, namespace string) 
 // It uses the dynamic client and supports filtering by namespace, labelSelector,
 // and fieldSelector.
 // It utilizes a cached GroupVersionResource (GVR) for efficiency.
+// If the Kubernetes API rejects the fieldSelector (not all fields are indexable
+// for every resource type), the list is retried without the fieldSelector and
+// the results are filtered client-side.
 // Returns a slice of maps, each representing a resource instance, or an error.
 func (c *Client) ListResources(ctx context.Context, kind, namespace, labelSelector, fieldSelector string) ([]map[string]interface{}, error) {
 	gvr, err := c.getCachedGVR(kind)
@@ -277,6 +280,22 @@ func (c *Client) ListResources(ctx context.Context, kind, namespace, labelSelect
 	} else {
 		list, err = c.dynamicClient.Resource(*gvr).List(ctx, options)
 	}
+
+	// Fallback: if the API rejects the field selector, retry without it
+	// and apply the filter client-side.
+	if err != nil && fieldSelector != "" && strings.Contains(err.Error(), "is not a known field selector") {
+		options.FieldSelector = ""
+		if namespace != "" {
+			list, err = c.dynamicClient.Resource(*gvr).Namespace(namespace).List(ctx, options)
+		} else {
+			list, err = c.dynamicClient.Resource(*gvr).List(ctx, options)
+		}
+		if err != nil {
+			return nil, fmt.Errorf("failed to list resources: %w", err)
+		}
+		list.Items = filterByFieldSelector(list.Items, fieldSelector)
+	}
+
 	if err != nil {
 		return nil, fmt.Errorf("failed to list resources: %w", err)
 	}
@@ -288,6 +307,93 @@ func (c *Client) ListResources(ctx context.Context, kind, namespace, labelSelect
 	}
 
 	return resources, nil
+}
+
+// filterByFieldSelector applies a Kubernetes-style field selector client-side.
+// Supports "field=value" (equality) and "field!=value" (inequality) expressions,
+// comma-separated for multiple conditions.  Nested fields use dot notation
+// (e.g. "status.phase").
+func filterByFieldSelector(items []unstructured.Unstructured, selector string) []unstructured.Unstructured {
+	filters := parseFieldSelector(selector)
+	if len(filters) == 0 {
+		return items
+	}
+	var result []unstructured.Unstructured
+	for _, item := range items {
+		if matchesFieldFilters(item.Object, filters) {
+			result = append(result, item)
+		}
+	}
+	return result
+}
+
+type fieldFilter struct {
+	field    string
+	value    string
+	notEqual bool
+}
+
+func parseFieldSelector(selector string) []fieldFilter {
+	var filters []fieldFilter
+	for _, part := range strings.Split(selector, ",") {
+		part = strings.TrimSpace(part)
+		if part == "" {
+			continue
+		}
+		// Check != before = so we don't split on the = inside !=
+		if idx := strings.Index(part, "!="); idx >= 0 {
+			filters = append(filters, fieldFilter{
+				field:    strings.TrimSpace(part[:idx]),
+				value:    strings.TrimSpace(part[idx+2:]),
+				notEqual: true,
+			})
+		} else if idx := strings.Index(part, "="); idx >= 0 {
+			filters = append(filters, fieldFilter{
+				field:    strings.TrimSpace(part[:idx]),
+				value:    strings.TrimSpace(part[idx+1:]),
+				notEqual: false,
+			})
+		}
+	}
+	return filters
+}
+
+func matchesFieldFilters(obj map[string]interface{}, filters []fieldFilter) bool {
+	for _, f := range filters {
+		actual := getNestedFieldValue(obj, f.field)
+		if f.notEqual {
+			if actual == f.value {
+				return false
+			}
+		} else {
+			if actual != f.value {
+				return false
+			}
+		}
+	}
+	return true
+}
+
+// getNestedFieldValue traverses a map by dot-separated path and returns the
+// string representation of the leaf value, or "" if not found.
+func getNestedFieldValue(obj map[string]interface{}, path string) string {
+	parts := strings.Split(path, ".")
+	current := obj
+	for i, part := range parts {
+		val, ok := current[part]
+		if !ok {
+			return ""
+		}
+		if i == len(parts)-1 {
+			return fmt.Sprintf("%v", val)
+		}
+		nested, ok := val.(map[string]interface{})
+		if !ok {
+			return ""
+		}
+		current = nested
+	}
+	return ""
 }
 
 // CreateOrUpdateResource creates a new resource or updates an existing one.

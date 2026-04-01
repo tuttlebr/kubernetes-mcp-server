@@ -110,14 +110,13 @@ subjects:
 
 ---
 apiVersion: apps/v1
-kind: Deployment
+kind: DaemonSet
 metadata:
   name: k8s-mcp-server
   namespace: k8s-mcp-server
   labels:
     app: k8s-mcp-server
 spec:
-  replicas: 1
   selector:
     matchLabels:
       app: k8s-mcp-server
@@ -127,6 +126,13 @@ spec:
         app: k8s-mcp-server
     spec:
       serviceAccountName: k8s-mcp-server
+      affinity:
+        nodeAffinity:
+          requiredDuringSchedulingIgnoredDuringExecution:
+            nodeSelectorTerms:
+              - matchExpressions:
+                  - key: node-role.kubernetes.io/control-plane
+                    operator: DoesNotExist
       containers:
         - name: k8s-mcp-server
           image: daedalus.ddns.me:5050/btuttle/k8s-mcp-server:latest
@@ -163,11 +169,11 @@ spec:
                   optional: true
           resources:
             requests:
-              memory: "64Mi"
-              cpu: "50m"
+              memory: "4Gi"
+              cpu: "4"
             limits:
-              memory: "256Mi"
-              cpu: "500m"
+              memory: "16Gi"
+              cpu: "8"
           volumeMounts:
             - name: kubeconfig
               mountPath: /home/appuser/.kube
@@ -261,6 +267,10 @@ metadata:
     app: k8s-mcp-server
 spec:
   type: ClusterIP
+  sessionAffinity: ClientIP
+  sessionAffinityConfig:
+    clientIP:
+      timeoutSeconds: 3600
   selector:
     app: k8s-mcp-server
   ports:

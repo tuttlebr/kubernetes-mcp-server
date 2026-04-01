@@ -5,6 +5,7 @@ import (
 	"testing"
 	"time"
 
+	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime/schema"
 )
 
@@ -208,5 +209,139 @@ func TestResolveKindName_UnknownPassthrough(t *testing.T) {
 	got := c.resolveKindName("something-unknown")
 	if got != "something-unknown" {
 		t.Errorf("expected passthrough for unknown kind, got %q", got)
+	}
+}
+
+// ---------------------------------------------------------------------------
+// Field selector client-side filtering
+// ---------------------------------------------------------------------------
+
+func makePod(name, namespace, phase string) unstructured.Unstructured {
+	return unstructured.Unstructured{
+		Object: map[string]interface{}{
+			"metadata": map[string]interface{}{
+				"name":      name,
+				"namespace": namespace,
+			},
+			"status": map[string]interface{}{
+				"phase": phase,
+			},
+		},
+	}
+}
+
+func TestParseFieldSelector_Equality(t *testing.T) {
+	filters := parseFieldSelector("status.phase=Running")
+	if len(filters) != 1 {
+		t.Fatalf("expected 1 filter, got %d", len(filters))
+	}
+	if filters[0].field != "status.phase" || filters[0].value != "Running" || filters[0].notEqual {
+		t.Errorf("unexpected filter: %+v", filters[0])
+	}
+}
+
+func TestParseFieldSelector_Inequality(t *testing.T) {
+	filters := parseFieldSelector("status.phase!=Running")
+	if len(filters) != 1 {
+		t.Fatalf("expected 1 filter, got %d", len(filters))
+	}
+	if filters[0].field != "status.phase" || filters[0].value != "Running" || !filters[0].notEqual {
+		t.Errorf("unexpected filter: %+v", filters[0])
+	}
+}
+
+func TestParseFieldSelector_Multiple(t *testing.T) {
+	filters := parseFieldSelector("status.phase=Running,metadata.namespace=default")
+	if len(filters) != 2 {
+		t.Fatalf("expected 2 filters, got %d", len(filters))
+	}
+}
+
+func TestParseFieldSelector_Empty(t *testing.T) {
+	filters := parseFieldSelector("")
+	if len(filters) != 0 {
+		t.Errorf("expected 0 filters for empty string, got %d", len(filters))
+	}
+}
+
+func TestFilterByFieldSelector_EqualityMatch(t *testing.T) {
+	items := []unstructured.Unstructured{
+		makePod("pod-a", "default", "Running"),
+		makePod("pod-b", "default", "Pending"),
+		makePod("pod-c", "kube-system", "Running"),
+	}
+	result := filterByFieldSelector(items, "status.phase=Running")
+	if len(result) != 2 {
+		t.Fatalf("expected 2 running pods, got %d", len(result))
+	}
+}
+
+func TestFilterByFieldSelector_InequalityMatch(t *testing.T) {
+	items := []unstructured.Unstructured{
+		makePod("pod-a", "default", "Running"),
+		makePod("pod-b", "default", "Pending"),
+		makePod("pod-c", "default", "Failed"),
+	}
+	result := filterByFieldSelector(items, "status.phase!=Running")
+	if len(result) != 2 {
+		t.Fatalf("expected 2 non-running pods, got %d", len(result))
+	}
+	for _, item := range result {
+		phase := getNestedFieldValue(item.Object, "status.phase")
+		if phase == "Running" {
+			t.Error("Running pod should have been filtered out")
+		}
+	}
+}
+
+func TestFilterByFieldSelector_MultipleConditions(t *testing.T) {
+	items := []unstructured.Unstructured{
+		makePod("pod-a", "default", "Running"),
+		makePod("pod-b", "kube-system", "Running"),
+		makePod("pod-c", "default", "Pending"),
+	}
+	result := filterByFieldSelector(items, "status.phase=Running,metadata.namespace=default")
+	if len(result) != 1 {
+		t.Fatalf("expected 1 pod (Running + default ns), got %d", len(result))
+	}
+	name := getNestedFieldValue(result[0].Object, "metadata.name")
+	if name != "pod-a" {
+		t.Errorf("expected pod-a, got %s", name)
+	}
+}
+
+func TestFilterByFieldSelector_NoSelector(t *testing.T) {
+	items := []unstructured.Unstructured{makePod("pod-a", "default", "Running")}
+	result := filterByFieldSelector(items, "")
+	if len(result) != 1 {
+		t.Errorf("empty selector should return all items, got %d", len(result))
+	}
+}
+
+func TestGetNestedFieldValue(t *testing.T) {
+	obj := map[string]interface{}{
+		"metadata": map[string]interface{}{
+			"name":      "my-pod",
+			"namespace": "default",
+		},
+		"status": map[string]interface{}{
+			"phase": "Running",
+		},
+	}
+	tests := []struct {
+		path string
+		want string
+	}{
+		{"metadata.name", "my-pod"},
+		{"metadata.namespace", "default"},
+		{"status.phase", "Running"},
+		{"nonexistent.field", ""},
+		{"metadata.nonexistent", ""},
+	}
+	for _, tt := range tests {
+		got := getNestedFieldValue(obj, tt.path)
+		if got != tt.want {
+			t.Errorf("getNestedFieldValue(%q) = %q, want %q", tt.path, got, tt.want)
+		}
 	}
 }
