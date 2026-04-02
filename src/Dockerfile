@@ -1,5 +1,5 @@
 # Stage 1: Build the Go binary
-FROM --platform=$BUILDPLATFORM golang:alpine AS builder
+FROM --platform=$BUILDPLATFORM golang:1.24-alpine AS builder
 
 # Install git (required for go modules) and update all packages
 RUN apk --no-cache upgrade && apk --no-cache add git ca-certificates
@@ -32,11 +32,25 @@ FROM oven/bun:1-alpine AS opencode-installer
 RUN bun install -g opencode-ai
 
 # Stage 3: Final runtime image
-FROM alpine:latest
+FROM alpine:3.21
 
 # Install ca-certificates, curl for health checks, tzdata for timezone,
 # and gcompat + libstdc++ for Bun/opencode runtime
-RUN apk --no-cache add ca-certificates curl tzdata gcompat libstdc++
+RUN apk --no-cache add ca-certificates curl tzdata gcompat libstdc++ bash
+
+# Install Helm for cluster management (with checksum verification)
+ARG TARGETARCH
+RUN case "${TARGETARCH}" in \
+      amd64) HELM_ARCH=amd64; HELM_SHA256="ee88b3c851ae6466a3de507f7be73fe94d54cbf2987cbaa3d1a3832ea331f2cd" ;; \
+      arm64) HELM_ARCH=arm64; HELM_SHA256="7944e3defd386c76fd92d9e6fec5c2d65a323f6fadc19bfb5e704e3eee10348e" ;; \
+      *) HELM_ARCH=amd64; HELM_SHA256="ee88b3c851ae6466a3de507f7be73fe94d54cbf2987cbaa3d1a3832ea331f2cd" ;; \
+    esac && \
+    curl -fsSL "https://get.helm.sh/helm-v3.17.3-linux-${HELM_ARCH}.tar.gz" -o /tmp/helm.tar.gz && \
+    echo "${HELM_SHA256}  /tmp/helm.tar.gz" | sha256sum -c - && \
+    tar xz -C /tmp -f /tmp/helm.tar.gz && \
+    mv /tmp/linux-${HELM_ARCH}/helm /usr/local/bin/helm && \
+    chmod +x /usr/local/bin/helm && \
+    rm -rf /tmp/helm.tar.gz /tmp/linux-${HELM_ARCH}
 
 # Set timezone
 ENV TZ=America/New_York

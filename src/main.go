@@ -248,6 +248,8 @@ func main() {
 		httpServer := &http.Server{
 			Addr:              ":" + port,
 			ReadHeaderTimeout: 30 * time.Second,
+			ReadTimeout:       5 * time.Minute,
+			IdleTimeout:       5 * time.Minute,
 		}
 		sse := server.NewSSEServer(s,
 			server.WithHTTPServer(httpServer),
@@ -284,6 +286,8 @@ func main() {
 		httpServer := &http.Server{
 			Addr:              ":" + port,
 			ReadHeaderTimeout: 30 * time.Second,
+			ReadTimeout:       5 * time.Minute,
+			IdleTimeout:       5 * time.Minute,
 		}
 		streamableHTTP := server.NewStreamableHTTPServer(
 			s,

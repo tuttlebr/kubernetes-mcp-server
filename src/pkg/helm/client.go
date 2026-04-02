@@ -2,7 +2,12 @@ package helm
 
 import (
 	"context"
+	"errors"
 	"fmt"
+	"log"
+	"os"
+	"path/filepath"
+
 	"helm.sh/helm/v3/pkg/action"
 	"helm.sh/helm/v3/pkg/chart/loader"
 	"helm.sh/helm/v3/pkg/cli"
@@ -12,9 +17,6 @@ import (
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/rest"
 	"k8s.io/client-go/tools/clientcmd"
-	"log"
-	"os"
-	"path/filepath"
 )
 
 // Client wraps Helm operations
@@ -60,17 +62,48 @@ func NewClient(kubeconfig string) (*Client, error) {
 		return nil, fmt.Errorf("failed to create Kubernetes client: %w", err)
 	}
 
-	return &Client{
+	c := &Client{
 		settings:   settings,
 		restConfig: restConfig,
 		k8sClient:  k8sClient,
-	}, nil
+	}
+
+	// Ensure the Helm repository config file exists so that repo operations
+	// don't fail on a fresh container with no prior helm usage.
+	if err := c.ensureRepoFile(); err != nil {
+		return nil, fmt.Errorf("failed to initialize helm repository config: %w", err)
+	}
+
+	return c, nil
+}
+
+// ensureRepoFile creates the Helm repositories.yaml with an empty repo list
+// if it does not already exist.
+func (c *Client) ensureRepoFile() error {
+	repoFile := c.settings.RepositoryConfig
+	if err := os.MkdirAll(filepath.Dir(repoFile), 0755); err != nil {
+		return err
+	}
+	if _, err := os.Stat(repoFile); errors.Is(err, os.ErrNotExist) {
+		f := repo.NewFile()
+		return f.WriteFile(repoFile, 0644)
+	}
+	return nil
+}
+
+// initActionConfig creates and initializes a Helm action configuration for the given namespace.
+func (c *Client) initActionConfig(namespace string) (*action.Configuration, error) {
+	cfg := &action.Configuration{}
+	if err := cfg.Init(c.settings.RESTClientGetter(), namespace, os.Getenv("HELM_DRIVER"), log.Printf); err != nil {
+		return nil, fmt.Errorf("failed to initialize action config: %w", err)
+	}
+	return cfg, nil
 }
 
 func (c *Client) InstallChart(ctx context.Context, namespace, releaseName, chartName, repoURL string, values map[string]interface{}) (*release.Release, error) {
-	actionConfig := &action.Configuration{}
-	if err := actionConfig.Init(c.settings.RESTClientGetter(), namespace, os.Getenv("HELM_DRIVER"), log.Printf); err != nil {
-		return nil, fmt.Errorf("failed to initialize action config: %w", err)
+	actionConfig, err := c.initActionConfig(namespace)
+	if err != nil {
+		return nil, err
 	}
 
 	client := action.NewInstall(actionConfig)
@@ -108,9 +141,9 @@ func (c *Client) InstallChart(ctx context.Context, namespace, releaseName, chart
 }
 
 func (c *Client) UpgradeChart(ctx context.Context, namespace, releaseName, chartName string, values map[string]interface{}) (*release.Release, error) {
-	actionConfig := &action.Configuration{}
-	if err := actionConfig.Init(c.settings.RESTClientGetter(), namespace, os.Getenv("HELM_DRIVER"), log.Printf); err != nil {
-		return nil, fmt.Errorf("failed to initialize action config: %w", err)
+	actionConfig, err := c.initActionConfig(namespace)
+	if err != nil {
+		return nil, err
 	}
 
 	client := action.NewUpgrade(actionConfig)
@@ -141,13 +174,13 @@ func (c *Client) UpgradeChart(ctx context.Context, namespace, releaseName, chart
 
 // UninstallChart uninstalls a Helm release
 func (c *Client) UninstallChart(ctx context.Context, namespace, releaseName string) error {
-	actionConfig := &action.Configuration{}
-	if err := actionConfig.Init(c.settings.RESTClientGetter(), namespace, os.Getenv("HELM_DRIVER"), log.Printf); err != nil {
-		return fmt.Errorf("failed to initialize action config: %w", err)
+	actionConfig, err := c.initActionConfig(namespace)
+	if err != nil {
+		return err
 	}
 
 	client := action.NewUninstall(actionConfig)
-	_, err := client.Run(releaseName)
+	_, err = client.Run(releaseName)
 	if err != nil {
 		return fmt.Errorf("failed to uninstall release: %w", err)
 	}
@@ -156,9 +189,9 @@ func (c *Client) UninstallChart(ctx context.Context, namespace, releaseName stri
 }
 
 func (c *Client) ListReleases(ctx context.Context, namespace string) ([]*release.Release, error) {
-	actionConfig := &action.Configuration{}
-	if err := actionConfig.Init(c.settings.RESTClientGetter(), namespace, os.Getenv("HELM_DRIVER"), log.Printf); err != nil {
-		return nil, fmt.Errorf("failed to initialize action config: %w", err)
+	actionConfig, err := c.initActionConfig(namespace)
+	if err != nil {
+		return nil, err
 	}
 
 	client := action.NewList(actionConfig)
@@ -184,9 +217,9 @@ func (c *Client) ListReleases(ctx context.Context, namespace string) ([]*release
 }
 
 func (c *Client) GetRelease(ctx context.Context, namespace, releaseName string) (*release.Release, error) {
-	actionConfig := &action.Configuration{}
-	if err := actionConfig.Init(c.settings.RESTClientGetter(), namespace, os.Getenv("HELM_DRIVER"), log.Printf); err != nil {
-		return nil, fmt.Errorf("failed to initialize action config: %w", err)
+	actionConfig, err := c.initActionConfig(namespace)
+	if err != nil {
+		return nil, err
 	}
 
 	client := action.NewGet(actionConfig)
@@ -199,9 +232,9 @@ func (c *Client) GetRelease(ctx context.Context, namespace, releaseName string) 
 }
 
 func (c *Client) GetReleaseHistory(ctx context.Context, namespace, releaseName string) ([]*release.Release, error) {
-	actionConfig := &action.Configuration{}
-	if err := actionConfig.Init(c.settings.RESTClientGetter(), namespace, os.Getenv("HELM_DRIVER"), log.Printf); err != nil {
-		return nil, fmt.Errorf("failed to initialize action config: %w", err)
+	actionConfig, err := c.initActionConfig(namespace)
+	if err != nil {
+		return nil, err
 	}
 
 	client := action.NewHistory(actionConfig)
@@ -215,9 +248,9 @@ func (c *Client) GetReleaseHistory(ctx context.Context, namespace, releaseName s
 
 // RollbackRelease rolls back a Helm release
 func (c *Client) RollbackRelease(ctx context.Context, namespace, releaseName string, revision int) error {
-	actionConfig := &action.Configuration{}
-	if err := actionConfig.Init(c.settings.RESTClientGetter(), namespace, os.Getenv("HELM_DRIVER"), log.Printf); err != nil {
-		return fmt.Errorf("failed to initialize action config: %w", err)
+	actionConfig, err := c.initActionConfig(namespace)
+	if err != nil {
+		return err
 	}
 
 	client := action.NewRollback(actionConfig)
@@ -241,7 +274,7 @@ func (c *Client) HelmRepoAdd(ctx context.Context, name, url string) error {
 
 	// Load existing repositories
 	f, err := repo.LoadFile(repoFile)
-	if err != nil && !os.IsNotExist(err) {
+	if err != nil && !errors.Is(err, os.ErrNotExist) {
 		return err
 	}
 	if f == nil {
@@ -276,6 +309,9 @@ func (c *Client) HelmRepoList(ctx context.Context) ([]*repo.Entry, error) {
 	repoFile := c.settings.RepositoryConfig
 	f, err := repo.LoadFile(repoFile)
 	if err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			return nil, nil
+		}
 		return nil, fmt.Errorf("failed to load repository file: %w", err)
 	}
 	return f.Repositories, nil

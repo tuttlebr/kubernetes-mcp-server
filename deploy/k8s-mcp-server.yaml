@@ -23,6 +23,7 @@ metadata:
   labels:
     app: k8s-mcp-server
 rules:
+  # Core resources (secrets values are redacted by SanitizeResource before reaching the LLM)
   - apiGroups: [""]
     resources:
       - pods
@@ -78,18 +79,14 @@ rules:
   - apiGroups: ["policy"]
     resources:
       - poddisruptionbudgets
-      - podsecuritypolicies
     verbs: ["get", "list", "watch"]
   - apiGroups: ["metrics.k8s.io"]
     resources:
       - pods
       - nodes
     verbs: ["get", "list"]
-  - apiGroups: [""]
-    resources:
-      - componentstatuses
-    verbs: ["get", "list"]
-  - nonResourceURLs: ["/api", "/api/*", "/apis", "/apis/*", "/healthz", "/version"]
+  # Discovery endpoints required by client-go's ServerPreferredResources
+  - nonResourceURLs: ["/api", "/api/v1", "/apis", "/healthz", "/version"]
     verbs: ["get"]
 
 ---
@@ -221,7 +218,7 @@ spec:
 apiVersion: cilium.io/v2
 kind: CiliumNetworkPolicy
 metadata:
-  name: k8s-mcp-server-egress
+  name: k8s-mcp-server-netpol
   namespace: k8s-mcp-server
   labels:
     app: k8s-mcp-server
@@ -229,6 +226,22 @@ spec:
   endpointSelector:
     matchLabels:
       app: k8s-mcp-server
+  ingress:
+    # Allow health checks from the kubelet
+    - fromEntities:
+        - host
+      toPorts:
+        - ports:
+            - port: "8080"
+              protocol: TCP
+    # Allow MCP clients from the daedalus namespace
+    - fromEndpoints:
+        - matchLabels:
+            k8s:io.kubernetes.pod.namespace: daedalus
+      toPorts:
+        - ports:
+            - port: "8080"
+              protocol: TCP
   egress:
     # Allow DNS resolution
     - toEndpoints:

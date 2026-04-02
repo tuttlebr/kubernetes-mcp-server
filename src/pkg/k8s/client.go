@@ -140,14 +140,14 @@ func (c *Client) KubeconfigPath() string {
 	return c.kubeconfigPath
 }
 
-// RunKubectlCommand executes an arbitrary kubectl command pipeline via the host shell.
-// The command must start with "kubectl". It is executed with the client's kubeconfig
-// set via the KUBECONFIG environment variable so that it targets the correct cluster.
+// RunKubectlCommand executes a kubectl command with the client's kubeconfig.
+// The command must start with "kubectl". Arguments are split on whitespace and
+// passed directly to exec (no shell interpretation) to prevent injection attacks.
 func (c *Client) RunKubectlCommand(ctx context.Context, command string, timeoutSec int) (map[string]interface{}, error) {
-	// Validate the command starts with kubectl
-	trimmed := strings.TrimSpace(command)
-	if !strings.HasPrefix(trimmed, "kubectl") {
-		return nil, fmt.Errorf("command must start with 'kubectl', got: %q", trimmed)
+	// Split into arguments (no shell interpretation)
+	args := strings.Fields(strings.TrimSpace(command))
+	if len(args) == 0 || args[0] != "kubectl" {
+		return nil, fmt.Errorf("command must start with 'kubectl', got: %q", command)
 	}
 
 	// Clamp timeout
@@ -161,7 +161,7 @@ func (c *Client) RunKubectlCommand(ctx context.Context, command string, timeoutS
 	cmdCtx, cancel := context.WithTimeout(ctx, time.Duration(timeoutSec)*time.Second)
 	defer cancel()
 
-	cmd := exec.CommandContext(cmdCtx, "sh", "-c", trimmed)
+	cmd := exec.CommandContext(cmdCtx, args[0], args[1:]...)
 
 	// Pass kubeconfig so kubectl targets the same cluster as the MCP server
 	cmd.Env = os.Environ()
@@ -176,7 +176,7 @@ func (c *Client) RunKubectlCommand(ctx context.Context, command string, timeoutS
 	err := cmd.Run()
 
 	result := map[string]interface{}{
-		"command": trimmed,
+		"command": strings.Join(args, " "),
 		"stdout":  SanitizeText(stdout.String()),
 	}
 
@@ -564,7 +564,16 @@ func (c *Client) getCachedGVR(kind string) (*schema.GroupVersionResource, error)
 	c.cacheLock.Lock()
 	defer c.cacheLock.Unlock()
 
-	if !cacheValid {
+	// Double-check: another goroutine may have rebuilt the cache while we waited
+	// for the write lock. If the cache is now valid, try a lookup before rebuilding.
+	if time.Since(c.cacheRefreshedAt) < gvrCacheTTL {
+		if gvr, exists := c.apiResourceCache[kind]; exists {
+			return gvr, nil
+		}
+		if gvr, exists := c.apiResourceCache[strings.ToLower(kind)]; exists {
+			return gvr, nil
+		}
+	} else {
 		c.apiResourceCache = make(map[string]*schema.GroupVersionResource)
 	}
 	c.cacheRefreshedAt = time.Now()
@@ -778,10 +787,13 @@ func (c *Client) GetPodsLogs(ctx context.Context, namespace, containerName, podN
 		allLogs.WriteString(fmt.Sprintf("\n--- Logs for container %s ---\n", container.Name))
 		buf := new(bytes.Buffer)
 		_, err = io.Copy(buf, logs)
-		logs.Close()
+		closeErr := logs.Close()
 
 		if err != nil {
 			allLogs.WriteString(fmt.Sprintf("Error reading logs: %v\n", err))
+		} else if closeErr != nil {
+			allLogs.WriteString(fmt.Sprintf("Warning: error closing log stream: %v\n", closeErr))
+			allLogs.WriteString(buf.String())
 		} else {
 			allLogs.WriteString(buf.String())
 		}
