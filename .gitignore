@@ -21,3 +21,6 @@ Thumbs.db
 
 # Upstream embedded git repo (src is a fork)
 src/.git/
+
+# OpenCode agent skills (user-local, not committed)
+src/skills/*/

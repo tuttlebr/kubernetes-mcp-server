@@ -4,6 +4,7 @@ package k8s
 import (
 	"bytes"
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -396,6 +397,51 @@ func getNestedFieldValue(obj map[string]interface{}, path string) string {
 	return ""
 }
 
+// normalizeSecretData moves non-base64 values from a Secret's "data" field to
+// "stringData", allowing Kubernetes to handle the encoding. This prevents the
+// "illegal base64 data" error that occurs when callers (typically LLMs) place
+// plain-text values in "data" instead of "stringData".
+func normalizeSecretData(obj *unstructured.Unstructured) {
+	if obj.GetKind() != "Secret" {
+		return
+	}
+
+	data, found, _ := unstructured.NestedMap(obj.Object, "data")
+	if !found || len(data) == 0 {
+		return
+	}
+
+	var toMove []string
+	for k, v := range data {
+		s, ok := v.(string)
+		if !ok {
+			continue
+		}
+		if _, err := base64.StdEncoding.DecodeString(s); err != nil {
+			toMove = append(toMove, k)
+		}
+	}
+
+	if len(toMove) == 0 {
+		return
+	}
+
+	stringData, _ := obj.Object["stringData"].(map[string]interface{})
+	if stringData == nil {
+		stringData = make(map[string]interface{}, len(toMove))
+	}
+
+	for _, k := range toMove {
+		stringData[k] = data[k]
+		delete(data, k)
+	}
+
+	obj.Object["stringData"] = stringData
+	if len(data) == 0 {
+		delete(obj.Object, "data")
+	}
+}
+
 // CreateOrUpdateResource creates a new resource or updates an existing one.
 // It parses the provided manifest string into an unstructured object.
 // It uses the dynamic client to first attempt an update, and if that fails
@@ -423,10 +469,23 @@ func (c *Client) CreateOrUpdateResourceJSON(ctx context.Context, namespace, mani
 		return nil, fmt.Errorf("resource name is required")
 	}
 
-	resource := c.dynamicClient.Resource(*gvr).Namespace(obj.GetNamespace())
+	// Normalize Secret data encoding before sending to the API
+	normalizeSecretData(obj)
+
+	var resource dynamic.ResourceInterface
+	if obj.GetNamespace() != "" {
+		resource = c.dynamicClient.Resource(*gvr).Namespace(obj.GetNamespace())
+	} else {
+		resource = c.dynamicClient.Resource(*gvr)
+	}
+
+	// Marshal the (possibly normalized) object for the patch payload
+	rawJSON, err := json.Marshal(obj.Object)
+	if err != nil {
+		return nil, fmt.Errorf("failed to marshal resource: %w", err)
+	}
 
 	// Try to patch; if not found, create
-	rawJSON := []byte(manifestJSON) // manifestJSON is already JSON
 	result, err := resource.Patch(
 		ctx,
 		obj.GetName(),
@@ -496,7 +555,21 @@ func (c *Client) CreateOrUpdateResourceYAML(ctx context.Context, namespace, yaml
 		return nil, fmt.Errorf("resource name is required in YAML manifest")
 	}
 
-	resource := c.dynamicClient.Resource(*gvr).Namespace(obj.GetNamespace())
+	// Normalize Secret data encoding before sending to the API
+	normalizeSecretData(obj)
+
+	var resource dynamic.ResourceInterface
+	if obj.GetNamespace() != "" {
+		resource = c.dynamicClient.Resource(*gvr).Namespace(obj.GetNamespace())
+	} else {
+		resource = c.dynamicClient.Resource(*gvr)
+	}
+
+	// Re-marshal the (possibly normalized) object for the patch payload
+	jsonData, err = json.Marshal(obj.Object)
+	if err != nil {
+		return nil, fmt.Errorf("failed to marshal resource: %w", err)
+	}
 
 	// Try to patch; if not found, create
 	result, err := resource.Patch(

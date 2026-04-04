@@ -12,6 +12,7 @@ import (
 	"helm.sh/helm/v3/pkg/chart/loader"
 	"helm.sh/helm/v3/pkg/cli"
 	"helm.sh/helm/v3/pkg/getter"
+	"helm.sh/helm/v3/pkg/registry"
 	"helm.sh/helm/v3/pkg/release"
 	"helm.sh/helm/v3/pkg/repo"
 	"k8s.io/client-go/kubernetes"
@@ -97,6 +98,14 @@ func (c *Client) initActionConfig(namespace string) (*action.Configuration, erro
 	if err := cfg.Init(c.settings.RESTClientGetter(), namespace, os.Getenv("HELM_DRIVER"), log.Printf); err != nil {
 		return nil, fmt.Errorf("failed to initialize action config: %w", err)
 	}
+
+	// Create a registry client so that OCI chart references (oci://...) can be resolved.
+	registryClient, err := registry.NewClient()
+	if err != nil {
+		return nil, fmt.Errorf("failed to create registry client: %w", err)
+	}
+	cfg.RegistryClient = registryClient
+
 	return cfg, nil
 }
 

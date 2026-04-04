@@ -68,6 +68,11 @@ COPY --from=opencode-installer /usr/local/bin/bun /usr/local/bin/bun
 COPY --from=opencode-installer --chown=1001:1001 /root/.bun/install/global /home/appuser/.bun/install/global
 RUN ln -s /home/appuser/.bun/install/global/node_modules/.bin/opencode /usr/local/bin/opencode
 
+# Create opencode config directory and install agent skills baked into the image
+RUN mkdir -p /home/appuser/.config/opencode/skills && \
+    chown -R appuser:appgroup /home/appuser/.config
+COPY --chown=appuser:appgroup skills/ /home/appuser/.config/opencode/skills/
+
 # Switch to non-root user
 USER appuser
 

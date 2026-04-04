@@ -9,6 +9,7 @@ A [Model Context Protocol (MCP)](https://modelcontextprotocol.io/) server that e
 - [Quick Start](#quick-start)
 - [Configuration](#configuration)
 - [Agent Debugging](#agent-debugging)
+- [Agent Skills](#agent-skills)
 - [Tool Reference](#tool-reference)
 - [Deployment](#deployment)
 - [Security](#security)
@@ -214,6 +215,66 @@ docker compose up
 | `model`    | No       | env var | Override `OPENCODE_MODEL` for this run                               |
 | `timeout`  | No       | `300`   | Max execution time in seconds (max: 900)                             |
 | `readOnly` | No       | `true`  | When false, the agent can perform remediation actions on the cluster |
+
+## Agent Skills
+
+[OpenCode skills](https://opencode.ai/docs/skills) are reusable instruction sets that extend the agent's behavior for specific domains — e.g., how to triage GPU workloads, how to interpret your team's alerting conventions, or domain-specific runbooks.
+
+### Adding Skills
+
+Each skill lives in its own subdirectory under `src/skills/` and requires a `SKILL.md` file with YAML frontmatter:
+
+```
+src/skills/
+└── my-skill/
+    └── SKILL.md
+```
+
+**`src/skills/my-skill/SKILL.md`**:
+
+```markdown
+---
+name: my-skill
+description: Brief description of what this skill teaches the agent
+---
+
+Your skill instructions here. Describe domain knowledge, investigation strategies,
+or specialized runbooks that the agent should follow when relevant.
+```
+
+**Frontmatter fields:**
+
+| Field         | Required | Description                                                        |
+| ------------- | -------- | ------------------------------------------------------------------ |
+| `name`        | Yes      | Lowercase letters/numbers/hyphens only; must match directory name  |
+| `description` | Yes      | 1–1024 character description used by the agent to select the skill |
+| `license`     | No       | Licensing information                                              |
+| `metadata`    | No       | Custom string key-value pairs                                      |
+
+The `name` must match its parent directory name exactly and follow the pattern `^[a-z0-9]+(-[a-z0-9]+)*$`.
+
+### How Skills Are Loaded
+
+**Docker / Kubernetes (build-time):** Skills in `src/skills/` are copied into the container image at `/home/appuser/.config/opencode/skills/` during `docker build`. Add your skills, rebuild the image, and they are available automatically.
+
+```bash
+# After adding a skill:
+make docker   # or docker compose build
+```
+
+**Runtime mount (no rebuild required):** Mount a local skills directory over the container path:
+
+```yaml
+# docker-compose.yaml
+volumes:
+  - ./my-skills:/home/appuser/.config/opencode/skills:ro
+```
+
+**Local development (without Docker):** Place skills in the global opencode config directory:
+
+```
+~/.config/opencode/skills/<name>/SKILL.md
+```
 
 ## Tool Reference
 
