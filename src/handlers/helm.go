@@ -3,7 +3,6 @@ package handlers
 import (
 	"context"
 	"fmt"
-	"strconv"
 	"time"
 
 	"github.com/mark3labs/mcp-go/mcp"
@@ -136,7 +135,61 @@ func HelmUpgrade(client *helm.Client) func(ctx context.Context, request mcp.Call
 			}
 		}
 
-		release, err := client.UpgradeChart(ctx, namespace, releaseName, chartName, values)
+		var upgradeTimeout time.Duration
+		if ts := getStringArg(args, "timeout", ""); ts != "" {
+			if upgradeTimeout, err = time.ParseDuration(ts); err != nil {
+				return nil, fmt.Errorf("invalid timeout %q: %w", ts, err)
+			}
+		}
+
+		var labels map[string]string
+		if l, exists := args["labels"]; exists {
+			if lMap, ok := l.(map[string]interface{}); ok && len(lMap) > 0 {
+				labels = make(map[string]string, len(lMap))
+				for k, v := range lMap {
+					if sv, ok := v.(string); ok {
+						labels[k] = sv
+					}
+				}
+			}
+		}
+
+		opts := helm.UpgradeOptions{
+			Version:                  getStringArg(args, "version", ""),
+			Devel:                    getBoolArg(args, "devel", false),
+			RepoURL:                  getStringArg(args, "repoURL", ""),
+			Username:                 getStringArg(args, "username", ""),
+			Password:                 getStringArg(args, "password", ""),
+			CaFile:                   getStringArg(args, "caFile", ""),
+			CertFile:                 getStringArg(args, "certFile", ""),
+			KeyFile:                  getStringArg(args, "keyFile", ""),
+			InsecureSkipTLSVerify:    getBoolArg(args, "insecureSkipTLSVerify", false),
+			PassCredentials:          getBoolArg(args, "passCredentials", false),
+			PlainHTTP:                getBoolArg(args, "plainHTTP", false),
+			Verify:                   getBoolArg(args, "verify", false),
+			ValuesFiles:              getStringArrayArg(args, "valuesFiles"),
+			Description:              getStringArg(args, "description", ""),
+			Labels:                   labels,
+			Wait:                     getBoolArg(args, "wait", false),
+			WaitForJobs:              getBoolArg(args, "waitForJobs", false),
+			Timeout:                  upgradeTimeout,
+			Atomic:                   getBoolArg(args, "atomic", false),
+			CleanupOnFail:            getBoolArg(args, "cleanupOnFail", false),
+			DryRunOption:             getStringArg(args, "dryRun", ""),
+			Force:                    getBoolArg(args, "force", false),
+			DisableHooks:             getBoolArg(args, "noHooks", false),
+			SkipCRDs:                 getBoolArg(args, "skipCRDs", false),
+			ReuseValues:              getBoolArg(args, "reuseValues", false),
+			ResetValues:              getBoolArg(args, "resetValues", false),
+			ResetThenReuseValues:     getBoolArg(args, "resetThenReuseValues", false),
+			DisableOpenAPIValidation: getBoolArg(args, "disableOpenAPIValidation", false),
+			SubNotes:                 getBoolArg(args, "renderSubchartNotes", false),
+			HideNotes:                getBoolArg(args, "hideNotes", false),
+			EnableDNS:                getBoolArg(args, "enableDNS", false),
+			MaxHistory:               getIntArg(args, "maxHistory", 0),
+		}
+
+		release, err := client.UpgradeChart(ctx, namespace, releaseName, chartName, opts, values)
 		if err != nil {
 			return nil, fmt.Errorf("failed to upgrade chart: %w", err)
 		}
@@ -281,12 +334,7 @@ func HelmRollback(client *helm.Client) func(ctx context.Context, request mcp.Cal
 
 		namespace := getStringArg(args, "namespace", "default")
 
-		revision := 0
-		if revStr := getStringArg(args, "revision", "0"); revStr != "0" {
-			if rev, err := strconv.Atoi(revStr); err == nil {
-				revision = rev
-			}
-		}
+		revision := getIntArg(args, "revision", 0)
 
 		err = client.RollbackRelease(ctx, namespace, releaseName, revision)
 		if err != nil {

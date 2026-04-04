@@ -273,7 +273,63 @@ func mergeMaps(dst, src map[string]interface{}) {
 	}
 }
 
-func (c *Client) UpgradeChart(ctx context.Context, namespace, releaseName, chartName string, values map[string]interface{}) (*release.Release, error) {
+// UpgradeOptions holds all options for the UpgradeChart operation,
+// corresponding to the flags accepted by `helm upgrade`.
+type UpgradeOptions struct {
+	// Chart source / version
+	Version               string
+	Devel                 bool
+	RepoURL               string
+	Username              string
+	Password              string
+	CaFile                string
+	CertFile              string
+	KeyFile               string
+	InsecureSkipTLSVerify bool
+	PassCredentials       bool
+	PlainHTTP             bool
+	Verify                bool
+
+	// Values
+	ValuesFiles []string // paths to YAML values files (-f / --values)
+
+	// Release metadata
+	Description string
+	Labels      map[string]string
+
+	// Deployment behavior
+	Wait          bool
+	WaitForJobs   bool
+	Timeout       time.Duration
+	Atomic        bool
+	CleanupOnFail bool
+
+	// Dry-run
+	DryRunOption string // "client" or "server"; empty = disabled
+
+	// Resource handling
+	Force        bool
+	DisableHooks bool
+	SkipCRDs     bool
+
+	// Values reuse strategy
+	ReuseValues          bool
+	ResetValues          bool
+	ResetThenReuseValues bool
+
+	// Validation
+	DisableOpenAPIValidation bool
+
+	// Output / rendering
+	SubNotes  bool
+	HideNotes bool
+	EnableDNS bool
+
+	// History cap (0 = unlimited)
+	MaxHistory int
+}
+
+func (c *Client) UpgradeChart(ctx context.Context, namespace, releaseName, chartName string, opts UpgradeOptions, values map[string]interface{}) (*release.Release, error) {
 	actionConfig, err := c.initActionConfig(namespace)
 	if err != nil {
 		return nil, err
@@ -282,8 +338,77 @@ func (c *Client) UpgradeChart(ctx context.Context, namespace, releaseName, chart
 	client := action.NewUpgrade(actionConfig)
 	client.Namespace = namespace
 
+	// Chart source / version
+	client.Version = opts.Version
+	client.Devel = opts.Devel
+	if opts.RepoURL != "" {
+		client.RepoURL = opts.RepoURL
+	}
+	client.Username = opts.Username
+	client.Password = opts.Password
+	client.CaFile = opts.CaFile
+	client.CertFile = opts.CertFile
+	client.KeyFile = opts.KeyFile
+	client.InsecureSkipTLSverify = opts.InsecureSkipTLSVerify
+	client.PassCredentialsAll = opts.PassCredentials
+	client.PlainHTTP = opts.PlainHTTP
+	client.Verify = opts.Verify
+
+	// Release metadata
+	client.Description = opts.Description
+	client.Labels = opts.Labels
+
+	// Deployment behavior
+	client.Wait = opts.Wait
+	client.WaitForJobs = opts.WaitForJobs
+	if opts.Timeout > 0 {
+		client.Timeout = opts.Timeout
+	}
+	client.Atomic = opts.Atomic
+	client.CleanupOnFail = opts.CleanupOnFail
+
+	// Dry-run
+	if opts.DryRunOption != "" {
+		client.DryRun = true
+		client.DryRunOption = opts.DryRunOption
+	}
+
+	// Resource handling
+	client.Force = opts.Force
+	client.DisableHooks = opts.DisableHooks
+	client.SkipCRDs = opts.SkipCRDs
+
+	// Values reuse strategy
+	client.ReuseValues = opts.ReuseValues
+	client.ResetValues = opts.ResetValues
+	client.ResetThenReuseValues = opts.ResetThenReuseValues
+
+	// Validation / output
+	client.DisableOpenAPIValidation = opts.DisableOpenAPIValidation
+	client.SubNotes = opts.SubNotes
+	client.HideNotes = opts.HideNotes
+	client.EnableDNS = opts.EnableDNS
+
+	if opts.MaxHistory > 0 {
+		client.MaxHistory = opts.MaxHistory
+	}
+
 	if values == nil {
 		values = make(map[string]interface{})
+	}
+
+	// Load values files (earlier files are lower priority; direct values override all)
+	if len(opts.ValuesFiles) > 0 {
+		merged := make(map[string]interface{})
+		for _, f := range opts.ValuesFiles {
+			fVals, err := chartutil.ReadValuesFile(f)
+			if err != nil {
+				return nil, fmt.Errorf("failed to read values file %q: %w", f, err)
+			}
+			mergeMaps(merged, fVals)
+		}
+		mergeMaps(merged, values)
+		values = merged
 	}
 
 	// Locate the chart (for both OCI and regular charts)
@@ -297,12 +422,12 @@ func (c *Client) UpgradeChart(ctx context.Context, namespace, releaseName, chart
 		return nil, fmt.Errorf("failed to load chart: %w", err)
 	}
 
-	release, err := client.Run(releaseName, chart, values)
+	rel, err := client.Run(releaseName, chart, values)
 	if err != nil {
 		return nil, fmt.Errorf("failed to upgrade chart: %w", err)
 	}
 
-	return release, nil
+	return rel, nil
 }
 
 // UninstallChart uninstalls a Helm release

@@ -44,6 +44,16 @@ func getRequiredStringArg(args map[string]interface{}, key string) (string, erro
 	return val, nil
 }
 
+func getIntArg(args map[string]interface{}, key string, defaultValue int) int {
+	switch v := args[key].(type) {
+	case float64:
+		return int(v)
+	case int:
+		return v
+	}
+	return defaultValue
+}
+
 func getStringArrayArg(args map[string]interface{}, key string) []string {
 	val, ok := args[key]
 	if !ok {

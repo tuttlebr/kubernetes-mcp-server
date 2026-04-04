@@ -126,21 +126,112 @@ func HelmUpgradeTool() mcp.Tool {
 	return mcp.NewTool("helmUpgrade",
 		mcp.WithDescription("Upgrade an existing Helm release to a new chart version or with new values. "+
 			"Equivalent to 'helm upgrade'. The release must already exist — use helmInstall for new releases. "+
+			"The chart can be referenced by repo name (e.g. \"bitnami/nginx\"), local path, absolute URL, or OCI reference (oci://...). "+
 			"Use helmHistory to see previous revisions and helmRollback to revert if needed. "+
 			"WRITE OPERATION: only available when server is not in read-only mode."),
+
+		// Required
 		mcp.WithString("releaseName", mcp.Required(),
 			mcp.Description("Name of the existing Helm release to upgrade.")),
 		mcp.WithString("chartName", mcp.Required(),
-			mcp.Description("Chart reference: either \"repo/chart\" for a repository chart (e.g. \"bitnami/nginx\") "+
-				"or a local filesystem path to a chart directory/archive.")),
+			mcp.Description("Chart reference: \"repo/chart\" (e.g. \"bitnami/nginx\"), local path, absolute URL, or OCI reference (oci://...).")),
+
+		// Namespace
 		mcp.WithString("namespace",
 			mcp.Description("Kubernetes namespace where the release is installed. Defaults to \"default\" if omitted.")),
-		mcp.WithObject("values",
-			mcp.Description("Key-value pairs to override chart values. Replaces previously set values. "+
-				"Pass as a JSON object. Example: {\"replicaCount\": 5, \"image.tag\": \"v2.0\"}.")),
+
+		// Chart version / source
+		mcp.WithString("version",
+			mcp.Description("Chart version to upgrade to (e.g. \"1.2.3\"). Required when pinning a specific version of an OCI or repo chart. Defaults to latest stable.")),
+		mcp.WithBoolean("devel",
+			mcp.Description("Include development/pre-release versions. Ignored when version is set.")),
 		mcp.WithString("repoURL",
-			mcp.Description("Helm repository URL. Only needed if the chart's repository has not been previously added. "+
+			mcp.Description("Helm repository URL. Only needed if the repo has not been added via helmRepoAdd. "+
 				"Example: \"https://prometheus-community.github.io/helm-charts\".")),
+		mcp.WithString("username",
+			mcp.Description("Username for chart repository authentication.")),
+		mcp.WithString("password",
+			mcp.Description("Password for chart repository authentication.")),
+		mcp.WithString("caFile",
+			mcp.Description("Path to a CA bundle file for verifying HTTPS certificates of the chart server.")),
+		mcp.WithString("certFile",
+			mcp.Description("Path to a client SSL certificate file for HTTPS authentication.")),
+		mcp.WithString("keyFile",
+			mcp.Description("Path to a client SSL key file for HTTPS authentication.")),
+		mcp.WithBoolean("insecureSkipTLSVerify",
+			mcp.Description("Skip TLS certificate verification for chart downloads.")),
+		mcp.WithBoolean("passCredentials",
+			mcp.Description("Pass repository credentials to all domains, not just the origin.")),
+		mcp.WithBoolean("plainHTTP",
+			mcp.Description("Use plain HTTP (instead of HTTPS) for chart downloads.")),
+		mcp.WithBoolean("verify",
+			mcp.Description("Verify the chart against its provenance file before upgrading.")),
+
+		// Values
+		mcp.WithObject("values",
+			mcp.Description("Key-value pairs to override chart values. Pass as a JSON object. "+
+				"Example: {\"replicaCount\": 5, \"image.tag\": \"v2.0\"}.")),
+		mcp.WithArray("valuesFiles",
+			mcp.Description("Paths to YAML values files to use (equivalent to -f / --values). "+
+				"Files are merged in order; later entries take precedence. Direct values override all files."),
+			mcp.WithStringItems()),
+
+		// Release metadata
+		mcp.WithString("description",
+			mcp.Description("Custom description to attach to the release metadata.")),
+		mcp.WithObject("labels",
+			mcp.Description("Labels to add to the release metadata (string values only). "+
+				"Example: {\"env\": \"prod\", \"team\": \"platform\"}.")),
+
+		// Deployment behavior
+		mcp.WithBoolean("wait",
+			mcp.Description("Wait until all Pods, PVCs, Services, and Deployments are ready before marking the upgrade successful.")),
+		mcp.WithBoolean("waitForJobs",
+			mcp.Description("When wait is true, also wait for all Jobs to complete before marking success.")),
+		mcp.WithString("timeout",
+			mcp.Description("Timeout for Kubernetes operations (e.g. \"5m0s\", \"300s\"). Defaults to 5m0s.")),
+		mcp.WithBoolean("atomic",
+			mcp.Description("Roll back the release on failure (implies --wait).")),
+		mcp.WithBoolean("cleanupOnFail",
+			mcp.Description("Delete new resources created during a failed upgrade.")),
+
+		// Dry-run / testing
+		mcp.WithString("dryRun",
+			mcp.Description("Simulate the upgrade without applying changes. "+
+				"\"client\" performs a local render with no cluster connection; "+
+				"\"server\" sends the manifests to the server for validation only.")),
+
+		// Resource handling
+		mcp.WithBoolean("force",
+			mcp.Description("Force resource updates via a delete/recreate strategy.")),
+		mcp.WithBoolean("noHooks",
+			mcp.Description("Disable pre/post-upgrade hooks.")),
+		mcp.WithBoolean("skipCRDs",
+			mcp.Description("Do not install CRDs during upgrade.")),
+
+		// Values reuse strategy
+		mcp.WithBoolean("reuseValues",
+			mcp.Description("Reuse the last release's values and merge in any new values. Cannot be used with resetValues.")),
+		mcp.WithBoolean("resetValues",
+			mcp.Description("Reset all values to chart defaults, then apply any supplied overrides. Cannot be used with reuseValues.")),
+		mcp.WithBoolean("resetThenReuseValues",
+			mcp.Description("Reset chart values to defaults, then reuse the last release's values, then merge any supplied overrides.")),
+
+		// Validation
+		mcp.WithBoolean("disableOpenAPIValidation",
+			mcp.Description("Disable validation of rendered manifests against the Kubernetes OpenAPI schema.")),
+
+		// Output / rendering
+		mcp.WithBoolean("renderSubchartNotes",
+			mcp.Description("Render notes from subcharts in addition to the parent chart notes.")),
+		mcp.WithBoolean("hideNotes",
+			mcp.Description("Suppress the NOTES.txt output after upgrade.")),
+		mcp.WithBoolean("enableDNS",
+			mcp.Description("Enable DNS lookups when rendering chart templates.")),
+
+		// History
+		mcp.WithNumber("maxHistory",
+			mcp.Description("Maximum number of release revisions to retain in history. 0 means no limit.")),
 	)
 }
 
