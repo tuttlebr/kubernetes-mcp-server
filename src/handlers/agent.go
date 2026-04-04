@@ -5,7 +5,7 @@ import (
 	"fmt"
 
 	"github.com/mark3labs/mcp-go/mcp"
-	"github.com/reza-gholizade/k8s-mcp-server/pkg/agent"
+	"github.com/tuttlebr/kubernetes-mcp-server/pkg/agent"
 )
 
 // AgentDebug returns a handler function for the agentDebug tool.

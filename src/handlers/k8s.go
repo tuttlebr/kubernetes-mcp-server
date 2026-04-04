@@ -6,7 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 
-	"github.com/reza-gholizade/k8s-mcp-server/pkg/k8s"
+	"github.com/tuttlebr/kubernetes-mcp-server/pkg/k8s"
 
 	"github.com/mark3labs/mcp-go/mcp"
 )
@@ -42,6 +42,24 @@ func getRequiredStringArg(args map[string]interface{}, key string) (string, erro
 		return "", fmt.Errorf("missing required parameter: %s", key)
 	}
 	return val, nil
+}
+
+func getStringArrayArg(args map[string]interface{}, key string) []string {
+	val, ok := args[key]
+	if !ok {
+		return nil
+	}
+	arr, ok := val.([]interface{})
+	if !ok {
+		return nil
+	}
+	result := make([]string, 0, len(arr))
+	for _, v := range arr {
+		if s, ok := v.(string); ok {
+			result = append(result, s)
+		}
+	}
+	return result
 }
 
 // GetAPIResources returns a handler function for the getAPIResources tool.

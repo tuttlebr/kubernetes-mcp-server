@@ -5,7 +5,7 @@ import (
 	"context"
 	"fmt"
 
-	"github.com/reza-gholizade/k8s-mcp-server/pkg/k8s"
+	"github.com/tuttlebr/kubernetes-mcp-server/pkg/k8s"
 
 	"github.com/mark3labs/mcp-go/mcp"
 )

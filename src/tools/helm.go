@@ -9,25 +9,115 @@ func HelmInstallTool() mcp.Tool {
 	return mcp.NewTool("helmInstall",
 		mcp.WithDescription("Install a Helm chart to the Kubernetes cluster, creating a new release. "+
 			"Equivalent to 'helm install'. The chart can be referenced by name from a configured repo "+
-			"(e.g. \"nginx/nginx-ingress\") or by a local path. "+
+			"(e.g. \"nginx/nginx-ingress\"), a local path, an absolute URL, or an OCI reference. "+
 			"Use helmList to check if a release already exists — use helmUpgrade for existing releases. "+
 			"WRITE OPERATION: only available when server is not in read-only mode."),
+
+		// Required
 		mcp.WithString("releaseName", mcp.Required(),
 			mcp.Description("Name for the Helm release. Must be unique within the namespace. "+
 				"Example: \"my-nginx\", \"prometheus-stack\".")),
 		mcp.WithString("chartName", mcp.Required(),
-			mcp.Description("Chart reference: either \"repo/chart\" for a repository chart (e.g. \"bitnami/nginx\") "+
-				"or a local filesystem path to a chart directory/archive.")),
+			mcp.Description("Chart reference: \"repo/chart\" (e.g. \"bitnami/nginx\"), local path, absolute URL, or OCI reference (oci://...).")),
+
+		// Namespace
 		mcp.WithString("namespace",
-			mcp.Description("Kubernetes namespace to install the release into. "+
-				"The namespace must already exist. Defaults to \"default\" if omitted.")),
+			mcp.Description("Kubernetes namespace to install the release into. Defaults to \"default\".")),
+
+		// Chart version / source
+		mcp.WithString("version",
+			mcp.Description("Chart version constraint (e.g. \"1.2.3\" or \"^2.0.0\"). Defaults to latest stable.")),
+		mcp.WithBoolean("devel",
+			mcp.Description("Include development/pre-release versions. Equivalent to --devel. Ignored when version is set.")),
 		mcp.WithString("repoURL",
-			mcp.Description("Helm repository URL to add before installing. "+
-				"Only needed if the chart's repository has not been previously added via helmRepoAdd. "+
+			mcp.Description("Helm repository URL. Only needed if the repo has not been added via helmRepoAdd. "+
 				"Example: \"https://charts.bitnami.com/bitnami\".")),
+		mcp.WithString("username",
+			mcp.Description("Username for chart repository authentication.")),
+		mcp.WithString("password",
+			mcp.Description("Password for chart repository authentication.")),
+		mcp.WithString("caFile",
+			mcp.Description("Path to a CA bundle file for verifying HTTPS certificates of the chart server.")),
+		mcp.WithString("certFile",
+			mcp.Description("Path to a client SSL certificate file for HTTPS authentication.")),
+		mcp.WithString("keyFile",
+			mcp.Description("Path to a client SSL key file for HTTPS authentication.")),
+		mcp.WithBoolean("insecureSkipTLSVerify",
+			mcp.Description("Skip TLS certificate verification for chart downloads.")),
+		mcp.WithBoolean("passCredentials",
+			mcp.Description("Pass repository credentials to all domains, not just the origin.")),
+		mcp.WithBoolean("plainHTTP",
+			mcp.Description("Use plain HTTP (instead of HTTPS) for chart downloads.")),
+		mcp.WithBoolean("verify",
+			mcp.Description("Verify the chart against its provenance file before installing.")),
+
+		// Values
 		mcp.WithObject("values",
-			mcp.Description("Key-value pairs to override chart default values, equivalent to 'helm install --set' or '-f values.yaml'. "+
-				"Pass as a JSON object. Example: {\"replicaCount\": 3, \"image.tag\": \"latest\"}.")),
+			mcp.Description("Key-value pairs to override chart defaults. Equivalent to --set. "+
+				"Example: {\"replicaCount\": 3, \"image.tag\": \"latest\"}.")),
+		mcp.WithArray("valuesFiles",
+			mcp.Description("Paths to YAML values files to use (equivalent to -f / --values). "+
+				"Files are merged in order; later entries take precedence. Direct values override all files."),
+			mcp.WithStringItems()),
+
+		// Install identity
+		mcp.WithBoolean("createNamespace",
+			mcp.Description("Create the release namespace if it does not exist. Defaults to true.")),
+		mcp.WithBoolean("generateName",
+			mcp.Description("Auto-generate the release name from the chart name (--generate-name). When true, releaseName is ignored.")),
+		mcp.WithString("nameTemplate",
+			mcp.Description("Go template used to generate the release name when generateName is true.")),
+		mcp.WithString("description",
+			mcp.Description("Custom description to attach to the release metadata.")),
+		mcp.WithObject("labels",
+			mcp.Description("Labels to add to the release metadata (string values only). "+
+				"Example: {\"env\": \"prod\", \"team\": \"platform\"}.")),
+		mcp.WithBoolean("dependencyUpdate",
+			mcp.Description("Run 'helm dependency update' before installing if chart dependencies are missing.")),
+
+		// Deployment behavior
+		mcp.WithBoolean("wait",
+			mcp.Description("Wait until all Pods, PVCs, Services, and Deployments are ready before marking the release successful.")),
+		mcp.WithBoolean("waitForJobs",
+			mcp.Description("When wait is true, also wait for all Jobs to complete before marking success.")),
+		mcp.WithString("timeout",
+			mcp.Description("Timeout for Kubernetes operations (e.g. \"5m0s\", \"300s\"). Defaults to 5m0s.")),
+		mcp.WithBoolean("atomic",
+			mcp.Description("Delete the release on failure (implies --wait). Rolls back automatically on error.")),
+
+		// Dry-run / testing
+		mcp.WithString("dryRun",
+			mcp.Description("Simulate the install without applying changes. "+
+				"\"client\" performs a local render with no cluster connection; "+
+				"\"server\" sends the manifests to the server for validation only.")),
+		mcp.WithBoolean("hideSecret",
+			mcp.Description("Suppress Kubernetes Secret values in dry-run output.")),
+
+		// Resource handling
+		mcp.WithBoolean("force",
+			mcp.Description("Force resource updates via a delete/recreate strategy.")),
+		mcp.WithBoolean("replace",
+			mcp.Description("Re-use the given release name, but only if the previous release was deleted and remains in history. Unsafe in production.")),
+		mcp.WithBoolean("skipCRDs",
+			mcp.Description("Do not install CRDs. By default, CRDs are installed if not already present.")),
+		mcp.WithBoolean("noHooks",
+			mcp.Description("Disable pre/post-install hooks.")),
+		mcp.WithBoolean("takeOwnership",
+			mcp.Description("Take ownership of existing resources that match the chart manifests, ignoring Helm annotations.")),
+
+		// Validation
+		mcp.WithBoolean("skipSchemaValidation",
+			mcp.Description("Disable JSON schema validation of chart values.")),
+		mcp.WithBoolean("disableOpenAPIValidation",
+			mcp.Description("Disable validation of rendered manifests against the Kubernetes OpenAPI schema.")),
+
+		// Output / rendering
+		mcp.WithBoolean("renderSubchartNotes",
+			mcp.Description("Render notes from subcharts in addition to the parent chart notes.")),
+		mcp.WithBoolean("hideNotes",
+			mcp.Description("Suppress the NOTES.txt output after install.")),
+		mcp.WithBoolean("enableDNS",
+			mcp.Description("Enable DNS lookups when rendering chart templates.")),
 	)
 }
 

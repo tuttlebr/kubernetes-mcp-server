@@ -7,9 +7,11 @@ import (
 	"log"
 	"os"
 	"path/filepath"
+	"time"
 
 	"helm.sh/helm/v3/pkg/action"
 	"helm.sh/helm/v3/pkg/chart/loader"
+	"helm.sh/helm/v3/pkg/chartutil"
 	"helm.sh/helm/v3/pkg/cli"
 	"helm.sh/helm/v3/pkg/getter"
 	"helm.sh/helm/v3/pkg/registry"
@@ -109,7 +111,62 @@ func (c *Client) initActionConfig(namespace string) (*action.Configuration, erro
 	return cfg, nil
 }
 
-func (c *Client) InstallChart(ctx context.Context, namespace, releaseName, chartName, repoURL string, values map[string]interface{}) (*release.Release, error) {
+// InstallOptions holds all options for the InstallChart operation,
+// corresponding to the flags accepted by `helm install`.
+type InstallOptions struct {
+	// Chart source / version
+	Version               string
+	Devel                 bool
+	RepoURL               string
+	Username              string
+	Password              string
+	CaFile                string
+	CertFile              string
+	KeyFile               string
+	InsecureSkipTLSVerify bool
+	PassCredentials       bool
+	PlainHTTP             bool
+	Verify                bool
+
+	// Values
+	ValuesFiles []string // paths to YAML values files (-f / --values)
+
+	// Install identity
+	CreateNamespace  bool
+	GenerateName     bool
+	NameTemplate     string
+	Description      string
+	Labels           map[string]string
+	DependencyUpdate bool
+
+	// Deployment behavior
+	Wait        bool
+	WaitForJobs bool
+	Timeout     time.Duration
+	Atomic      bool
+
+	// Dry-run
+	DryRunOption string // "client" or "server"; empty = disabled
+	HideSecret   bool
+
+	// Resource handling
+	Force         bool
+	Replace       bool
+	SkipCRDs      bool
+	DisableHooks  bool
+	TakeOwnership bool
+
+	// Validation
+	SkipSchemaValidation     bool
+	DisableOpenAPIValidation bool
+
+	// Output / rendering
+	SubNotes  bool // render subchart notes
+	HideNotes bool
+	EnableDNS bool
+}
+
+func (c *Client) InstallChart(ctx context.Context, namespace, releaseName, chartName string, opts InstallOptions, values map[string]interface{}) (*release.Release, error) {
 	actionConfig, err := c.initActionConfig(namespace)
 	if err != nil {
 		return nil, err
@@ -118,14 +175,68 @@ func (c *Client) InstallChart(ctx context.Context, namespace, releaseName, chart
 	client := action.NewInstall(actionConfig)
 	client.Namespace = namespace
 	client.ReleaseName = releaseName
-	client.CreateNamespace = true
+
+	// Apply all options to the action client
+	client.CreateNamespace = opts.CreateNamespace
+	client.Wait = opts.Wait
+	client.WaitForJobs = opts.WaitForJobs
+	if opts.Timeout > 0 {
+		client.Timeout = opts.Timeout
+	}
+	client.Atomic = opts.Atomic
+	client.Force = opts.Force
+	client.Replace = opts.Replace
+	client.SkipCRDs = opts.SkipCRDs
+	client.DisableHooks = opts.DisableHooks
+	client.TakeOwnership = opts.TakeOwnership
+	client.GenerateName = opts.GenerateName
+	client.NameTemplate = opts.NameTemplate
+	client.Description = opts.Description
+	client.Labels = opts.Labels
+	client.DependencyUpdate = opts.DependencyUpdate
+	client.Devel = opts.Devel
+	client.SkipSchemaValidation = opts.SkipSchemaValidation
+	client.DisableOpenAPIValidation = opts.DisableOpenAPIValidation
+	client.SubNotes = opts.SubNotes
+	client.HideNotes = opts.HideNotes
+	client.HideSecret = opts.HideSecret
+	client.EnableDNS = opts.EnableDNS
+	if opts.DryRunOption != "" {
+		client.DryRun = true
+		client.DryRunOption = opts.DryRunOption
+	}
+
+	// Chart path / auth options
+	if opts.RepoURL != "" {
+		client.RepoURL = opts.RepoURL
+	}
+	client.Version = opts.Version
+	client.Username = opts.Username
+	client.Password = opts.Password
+	client.CaFile = opts.CaFile
+	client.CertFile = opts.CertFile
+	client.KeyFile = opts.KeyFile
+	client.InsecureSkipTLSverify = opts.InsecureSkipTLSVerify
+	client.PassCredentialsAll = opts.PassCredentials
+	client.PlainHTTP = opts.PlainHTTP
+	client.Verify = opts.Verify
+
 	if values == nil {
 		values = make(map[string]interface{})
 	}
 
-	// If repoURL is provided, add it to settings or append to chartName accordingly
-	if repoURL != "" {
-		client.RepoURL = repoURL
+	// Load values files (earlier files are lower priority; direct values override all)
+	if len(opts.ValuesFiles) > 0 {
+		merged := make(map[string]interface{})
+		for _, f := range opts.ValuesFiles {
+			fVals, err := chartutil.ReadValuesFile(f)
+			if err != nil {
+				return nil, fmt.Errorf("failed to read values file %q: %w", f, err)
+			}
+			mergeMaps(merged, fVals)
+		}
+		mergeMaps(merged, values)
+		values = merged
 	}
 
 	// Locate the chart (resolves repo/chart or OCI)
@@ -134,19 +245,32 @@ func (c *Client) InstallChart(ctx context.Context, namespace, releaseName, chart
 		return nil, fmt.Errorf("failed to locate chart: %w", err)
 	}
 
-	// Load the chart from the resolved path (can be a URL or OCI reference)
+	// Load the chart from the resolved path
 	chart, err := loader.Load(chartPath)
 	if err != nil {
 		return nil, fmt.Errorf("failed to load chart: %w", err)
 	}
 
 	// Run the install action
-	release, err := client.Run(chart, values)
+	rel, err := client.Run(chart, values)
 	if err != nil {
 		return nil, fmt.Errorf("failed to install chart: %w", err)
 	}
 
-	return release, nil
+	return rel, nil
+}
+
+// mergeMaps deep-merges src into dst; src values take precedence. Mutates dst.
+func mergeMaps(dst, src map[string]interface{}) {
+	for k, v := range src {
+		if vMap, ok := v.(map[string]interface{}); ok {
+			if dstMap, ok := dst[k].(map[string]interface{}); ok {
+				mergeMaps(dstMap, vMap)
+				continue
+			}
+		}
+		dst[k] = v
+	}
 }
 
 func (c *Client) UpgradeChart(ctx context.Context, namespace, releaseName, chartName string, values map[string]interface{}) (*release.Release, error) {

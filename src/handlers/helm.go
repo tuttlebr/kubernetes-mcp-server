@@ -4,9 +4,10 @@ import (
 	"context"
 	"fmt"
 	"strconv"
+	"time"
 
 	"github.com/mark3labs/mcp-go/mcp"
-	"github.com/reza-gholizade/k8s-mcp-server/pkg/helm"
+	"github.com/tuttlebr/kubernetes-mcp-server/pkg/helm"
 )
 
 // HelmInstall returns a handler function for the helmInstall tool
@@ -29,7 +30,6 @@ func HelmInstall(client *helm.Client) func(ctx context.Context, request mcp.Call
 		}
 
 		namespace := getStringArg(args, "namespace", "default")
-		repoURL := getStringArg(args, "repoURL", "")
 
 		values := make(map[string]interface{})
 		if v, exists := args["values"]; exists {
@@ -38,7 +38,64 @@ func HelmInstall(client *helm.Client) func(ctx context.Context, request mcp.Call
 			}
 		}
 
-		release, err := client.InstallChart(ctx, namespace, releaseName, chartName, repoURL, values)
+		var timeout time.Duration
+		if ts := getStringArg(args, "timeout", ""); ts != "" {
+			if timeout, err = time.ParseDuration(ts); err != nil {
+				return nil, fmt.Errorf("invalid timeout %q: %w", ts, err)
+			}
+		}
+
+		var labels map[string]string
+		if l, exists := args["labels"]; exists {
+			if lMap, ok := l.(map[string]interface{}); ok && len(lMap) > 0 {
+				labels = make(map[string]string, len(lMap))
+				for k, v := range lMap {
+					if sv, ok := v.(string); ok {
+						labels[k] = sv
+					}
+				}
+			}
+		}
+
+		opts := helm.InstallOptions{
+			Version:                  getStringArg(args, "version", ""),
+			Devel:                    getBoolArg(args, "devel", false),
+			RepoURL:                  getStringArg(args, "repoURL", ""),
+			Username:                 getStringArg(args, "username", ""),
+			Password:                 getStringArg(args, "password", ""),
+			CaFile:                   getStringArg(args, "caFile", ""),
+			CertFile:                 getStringArg(args, "certFile", ""),
+			KeyFile:                  getStringArg(args, "keyFile", ""),
+			InsecureSkipTLSVerify:    getBoolArg(args, "insecureSkipTLSVerify", false),
+			PassCredentials:          getBoolArg(args, "passCredentials", false),
+			PlainHTTP:                getBoolArg(args, "plainHTTP", false),
+			Verify:                   getBoolArg(args, "verify", false),
+			ValuesFiles:              getStringArrayArg(args, "valuesFiles"),
+			CreateNamespace:          getBoolArg(args, "createNamespace", true),
+			GenerateName:             getBoolArg(args, "generateName", false),
+			NameTemplate:             getStringArg(args, "nameTemplate", ""),
+			Description:              getStringArg(args, "description", ""),
+			Labels:                   labels,
+			DependencyUpdate:         getBoolArg(args, "dependencyUpdate", false),
+			Wait:                     getBoolArg(args, "wait", false),
+			WaitForJobs:              getBoolArg(args, "waitForJobs", false),
+			Timeout:                  timeout,
+			Atomic:                   getBoolArg(args, "atomic", false),
+			DryRunOption:             getStringArg(args, "dryRun", ""),
+			HideSecret:               getBoolArg(args, "hideSecret", false),
+			Force:                    getBoolArg(args, "force", false),
+			Replace:                  getBoolArg(args, "replace", false),
+			SkipCRDs:                 getBoolArg(args, "skipCRDs", false),
+			DisableHooks:             getBoolArg(args, "noHooks", false),
+			TakeOwnership:            getBoolArg(args, "takeOwnership", false),
+			SkipSchemaValidation:     getBoolArg(args, "skipSchemaValidation", false),
+			DisableOpenAPIValidation: getBoolArg(args, "disableOpenAPIValidation", false),
+			SubNotes:                 getBoolArg(args, "renderSubchartNotes", false),
+			HideNotes:                getBoolArg(args, "hideNotes", false),
+			EnableDNS:                getBoolArg(args, "enableDNS", false),
+		}
+
+		release, err := client.InstallChart(ctx, namespace, releaseName, chartName, opts, values)
 		if err != nil {
 			return nil, fmt.Errorf("failed to install chart: %w", err)
 		}

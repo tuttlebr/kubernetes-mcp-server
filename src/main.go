@@ -20,11 +20,11 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/reza-gholizade/k8s-mcp-server/handlers"
-	"github.com/reza-gholizade/k8s-mcp-server/pkg/agent"
-	"github.com/reza-gholizade/k8s-mcp-server/pkg/helm"
-	"github.com/reza-gholizade/k8s-mcp-server/pkg/k8s"
-	"github.com/reza-gholizade/k8s-mcp-server/tools"
+	"github.com/tuttlebr/kubernetes-mcp-server/handlers"
+	"github.com/tuttlebr/kubernetes-mcp-server/pkg/agent"
+	"github.com/tuttlebr/kubernetes-mcp-server/pkg/helm"
+	"github.com/tuttlebr/kubernetes-mcp-server/pkg/k8s"
+	"github.com/tuttlebr/kubernetes-mcp-server/tools"
 
 	"github.com/mark3labs/mcp-go/server"
 )

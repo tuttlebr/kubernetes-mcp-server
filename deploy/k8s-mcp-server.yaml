@@ -324,9 +324,6 @@ spec:
     # Allow HTTPS egress to external FQDNs
     - toFQDNs:
         - matchPattern: "*.nvidia.com"
-        - matchPattern: "*.ngc.nvidia.com"
-        - matchPattern: "*.amazonaws.com"
-        - matchPattern: "*.s3.amazonaws.com"
         - matchPattern: "*.us-east-1.compute.amazonaws.com"
         - matchPattern: "*.us-east-2.compute.amazonaws.com"
         - matchPattern: "*.us-west-1.compute.amazonaws.com"
@@ -338,7 +335,34 @@ spec:
         - matchName: "spot.gdn.nvidia.com"
         - matchName: "ess.ngc.nvidia.com"
         - matchName: "api.ngc.nvidia.com"
+        # GitHub Container Registry (apex required for ghcr.io/org/image pulls)
         - matchName: "ghcr.io"
+        - matchPattern: "*.ghcr.io"
+        # Docker Hub (registry-1.docker.io + auth.docker.io covered by wildcard)
+        - matchPattern: "*.docker.io"
+        # Quay.io (apex required for quay.io/org/image pulls)
+        - matchName: "quay.io"
+        - matchPattern: "*.quay.io"
+        # Kubernetes image registry (apex required for registry.k8s.io/pause etc.)
+        - matchName: "registry.k8s.io"
+        - matchPattern: "*.registry.k8s.io"
+        # Google Container Registry (legacy k8s.gcr.io + current gcr.io)
+        - matchName: "k8s.gcr.io"
+        - matchName: "gcr.io"
+        - matchPattern: "*.gcr.io"
+        # Google Artifact Registry (modern GCR replacement, e.g. europe-docker.pkg.dev)
+        - matchPattern: "*.pkg.dev"
+        # GCS-backed Helm chart tarballs and other chart repo assets
+        - matchName: "storage.googleapis.com"
+        # GitHub raw content (Helm index.yaml, chart tarballs)
+        - matchPattern: "*.githubusercontent.com"
+        # GitHub Pages (many Helm chart repos, e.g. charts.jetstack.io)
+        - matchPattern: "*.github.io"
+        # Official Helm stable/incubator chart repos
+        - matchName: "charts.helm.sh"
+        # NVIDIA Container Registry (apex required for nvcr.io/nvidia/image pulls)
+        - matchName: "nvcr.io"
+        - matchPattern: "*.nvcr.io"
       toPorts:
         - ports:
             - port: "443"
