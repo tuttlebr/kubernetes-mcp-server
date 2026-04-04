@@ -234,16 +234,15 @@ spec:
         - ports:
             - port: "8080"
               protocol: TCP
-    # Allow MCP clients from the daedalus namespace
-    - fromEndpoints:
-        - matchLabels:
-            k8s:io.kubernetes.pod.namespace: daedalus
+    # Allow MCP clients from within the cluster
+    - fromEntities:
+        - cluster
       toPorts:
         - ports:
             - port: "8080"
               protocol: TCP
   egress:
-    # Allow DNS resolution
+    # Allow DNS resolution (pod-networked CoreDNS)
     - toEndpoints:
         - matchLabels:
             k8s:io.kubernetes.pod.namespace: kube-system
@@ -254,6 +253,22 @@ spec:
               protocol: UDP
             - port: "53"
               protocol: TCP
+          rules:
+            dns:
+              - matchPattern: "*"
+    # Allow DNS resolution (host-networked CoreDNS, bare-metal / kubeadm)
+    - toEntities:
+        - host
+        - remote-node
+      toPorts:
+        - ports:
+            - port: "53"
+              protocol: UDP
+            - port: "53"
+              protocol: TCP
+          rules:
+            dns:
+              - matchPattern: "*"
     # Allow access to Kubernetes API server
     - toEntities:
         - kube-apiserver
@@ -262,9 +277,68 @@ spec:
         - 10.0.0.0/8
         - 172.16.0.0/12
         - 192.168.0.0/16
-    # Allow HTTPS egress to *.nvidia.com
+
+---
+# NOTE: toFQDNs and toCIDR MUST live in separate CiliumNetworkPolicy
+# resources -- Cilium 1.19+ rejects policies that combine toCIDR (generated
+# internally by toFQDNs) with toCIDR/toCIDRSet.
+apiVersion: cilium.io/v2
+kind: CiliumNetworkPolicy
+metadata:
+  name: k8s-mcp-server-fqdn-egress
+  namespace: k8s-mcp-server
+  labels:
+    app: k8s-mcp-server
+spec:
+  endpointSelector:
+    matchLabels:
+      app: k8s-mcp-server
+  egress:
+    # DNS (required for FQDN resolution in this policy)
+    - toEndpoints:
+        - matchLabels:
+            k8s:io.kubernetes.pod.namespace: kube-system
+            k8s-app: kube-dns
+      toPorts:
+        - ports:
+            - port: "53"
+              protocol: UDP
+            - port: "53"
+              protocol: TCP
+          rules:
+            dns:
+              - matchPattern: "*"
+    # Host-networked CoreDNS (bare-metal / kubeadm)
+    - toEntities:
+        - host
+        - remote-node
+      toPorts:
+        - ports:
+            - port: "53"
+              protocol: UDP
+            - port: "53"
+              protocol: TCP
+          rules:
+            dns:
+              - matchPattern: "*"
+    # Allow HTTPS egress to external FQDNs
     - toFQDNs:
         - matchPattern: "*.nvidia.com"
+        - matchPattern: "*.ngc.nvidia.com"
+        - matchPattern: "*.amazonaws.com"
+        - matchPattern: "*.s3.amazonaws.com"
+        - matchPattern: "*.us-east-1.compute.amazonaws.com"
+        - matchPattern: "*.us-east-2.compute.amazonaws.com"
+        - matchPattern: "*.us-west-1.compute.amazonaws.com"
+        - matchPattern: "*.us-west-2.compute.amazonaws.com"
+        - matchName: "connect.pnats.nvcf.nvidia.com"
+        - matchName: "grpc.api.nvcf.nvidia.com"
+        - matchPattern: "*.api.nvcf.nvidia.com"
+        - matchPattern: "*.sqs.amazonaws.com"
+        - matchName: "spot.gdn.nvidia.com"
+        - matchName: "ess.ngc.nvidia.com"
+        - matchName: "api.ngc.nvidia.com"
+        - matchName: "ghcr.io"
       toPorts:
         - ports:
             - port: "443"
