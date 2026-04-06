@@ -8,8 +8,8 @@ import (
 	"github.com/tuttlebr/kubernetes-mcp-server/pkg/agent"
 )
 
-// AgentDebug returns a handler function for the agentDebug tool.
-func AgentDebug(agentClient *agent.Client) func(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+// DevopsAgent returns a handler function for the devopsAgent tool.
+func DevopsAgent(agentClient *agent.Client) func(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 	return func(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 		args, ok := request.Params.Arguments.(map[string]interface{})
 		if !ok {
@@ -23,7 +23,7 @@ func AgentDebug(agentClient *agent.Client) func(ctx context.Context, request mcp
 
 		namespace := getStringArg(args, "namespace", "")
 		model := getStringArg(args, "model", "")
-		readOnly := getBoolArg(args, "readOnly", true)
+		readOnly := getBoolArg(args, "readOnly", false)
 
 		timeout := 300
 		if val, ok := args["timeout"]; ok {
@@ -45,7 +45,7 @@ func AgentDebug(agentClient *agent.Client) func(ctx context.Context, request mcp
 
 		result, err := agentClient.Run(ctx, params)
 		if err != nil {
-			return nil, fmt.Errorf("agent debugging failed: %w", err)
+			return nil, fmt.Errorf("devops agent run failed: %w", err)
 		}
 
 		jsonResponse, err := marshalSafe(result)

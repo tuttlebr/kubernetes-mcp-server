@@ -4,26 +4,27 @@ import (
 	"github.com/mark3labs/mcp-go/mcp"
 )
 
-// AgentDebugTool creates a tool for autonomous Kubernetes debugging using an AI agent.
-func AgentDebugTool() mcp.Tool {
+// DevopsAgentTool creates a tool for an autonomous DevOps agent that manages Kubernetes clusters.
+func DevopsAgentTool() mcp.Tool {
 	return mcp.NewTool(
-		"agentDebug",
-		mcp.WithDescription("Launch an autonomous AI debugging agent that investigates Kubernetes issues "+
-			"using the full suite of k8s and Helm MCP tools. The agent runs headlessly via opencode, "+
-			"connecting to a child k8s-mcp-server instance for cluster access. "+
-			"Provide a natural language description of the issue and the agent will systematically "+
-			"inspect cluster state, logs, events, and resource configurations to produce a structured diagnosis. "+
+		"devopsAgent",
+		mcp.WithDescription("Launch an autonomous DevOps agent for Kubernetes cluster management. "+
+			"The agent can install, upgrade, debug, and manage workloads using the full suite of k8s and Helm MCP tools. "+
+			"It runs headlessly via opencode, connecting to a child k8s-mcp-server instance for cluster access. "+
+			"Provide a natural language description of what you need — the agent will autonomously execute the required operations "+
+			"and produce a structured report. "+
 			"Requires: opencode CLI installed, OPENCODE_BASE_URL, OPENCODE_API_KEY, and OPENCODE_MODEL env vars set. "+
 			"WRITE OPERATION: only available when server is not in read-only mode."),
 		mcp.WithString("prompt", mcp.Required(),
-			mcp.Description("Natural language description of the Kubernetes issue to debug. "+
-				"Be specific: include resource names, namespaces, error messages, or symptoms. "+
+			mcp.Description("Natural language description of the Kubernetes task to perform. "+
+				"Be specific: include resource names, namespaces, chart names, or error messages. "+
 				"Examples: "+
+				"\"Install the nginx-ingress Helm chart in namespace ingress-system with 3 replicas\", "+
+				"\"Scale the api-gateway deployment in production to 5 replicas and verify rollout\", "+
 				"\"Pods in namespace ml-training are stuck in Pending state with GPU resource requests\", "+
-				"\"The nginx-ingress deployment in production keeps crashing with OOMKilled\", "+
-				"\"Services in namespace api-gateway are not reachable from other namespaces\".")),
+				"\"Upgrade the prometheus-stack Helm release to chart version 45.0.0 in namespace monitoring\".")),
 		mcp.WithString("namespace",
-			mcp.Description("Kubernetes namespace to focus the investigation on. "+
+			mcp.Description("Kubernetes namespace to focus operations on. "+
 				"The agent will prioritize resources in this namespace but may inspect cluster-wide resources as needed.")),
 		mcp.WithString("model",
 			mcp.Description("Override the default LLM model for this agent run. "+
@@ -31,12 +32,13 @@ func AgentDebugTool() mcp.Tool {
 				"Uses OPENCODE_MODEL environment variable if omitted.")),
 		mcp.WithNumber("timeout",
 			mcp.Description("Maximum execution time in seconds for the agent run. "+
-				"Agentic debugging tasks typically take 1-5 minutes. Default: 300. Max: 900."),
+				"DevOps tasks typically take 1-5 minutes. Default: 300. Max: 900."),
 			mcp.DefaultNumber(300)),
 		mcp.WithBoolean("readOnly",
-			mcp.Description("When true (default), the child k8s-mcp-server runs in read-only mode, "+
+			mcp.Description("When true, the child k8s-mcp-server runs in read-only mode, "+
 				"preventing the agent from making any cluster changes. "+
-				"Set to false to allow the agent to perform remediation actions."),
-			mcp.DefaultBool(true)),
+				"Defaults to false, allowing the agent to perform management and remediation actions. "+
+				"Set to true for inspection-only runs."),
+			mcp.DefaultBool(false)),
 	)
 }

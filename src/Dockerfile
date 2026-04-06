@@ -27,7 +27,7 @@ ARG TARGETARCH
 RUN CGO_ENABLED=0 GOOS=${TARGETOS:-linux} GOARCH=${TARGETARCH:-amd64} \
     go build -ldflags="-w -s" -o k8s-mcp-server main.go
 
-# Stage 2: Install opencode for agent debugging support
+# Stage 2: Install opencode for DevOps agent support
 FROM oven/bun:1-alpine AS opencode-installer
 RUN bun install -g opencode-ai
 
@@ -63,7 +63,7 @@ RUN addgroup -g 1001 -S appgroup && \
 COPY --from=builder /app/k8s-mcp-server /usr/local/bin/k8s-mcp-server
 RUN chmod +x /usr/local/bin/k8s-mcp-server
 
-# Copy Bun runtime and opencode for agent debugging
+# Copy Bun runtime and opencode for DevOps agent
 COPY --from=opencode-installer /usr/local/bin/bun /usr/local/bin/bun
 COPY --from=opencode-installer --chown=1001:1001 /root/.bun/install/global /home/appuser/.bun/install/global
 RUN ln -s /home/appuser/.bun/install/global/node_modules/.bin/opencode /usr/local/bin/opencode

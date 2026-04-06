@@ -145,7 +145,7 @@ spec:
               value: "8080"
             - name: KUBECONFIG
               value: "/home/appuser/.kube/config"
-            # Agent debugging (optional — omit to disable agentDebug tool)
+            # DevOps agent (optional — omit to disable devopsAgent tool)
             - name: OPENCODE_BASE_URL
               valueFrom:
                 secretKeyRef:
@@ -363,6 +363,7 @@ spec:
         # NVIDIA Container Registry (apex required for nvcr.io/nvidia/image pulls)
         - matchName: "nvcr.io"
         - matchPattern: "*.nvcr.io"
+        - matchName: "helm.ngc.nvidia.com"
       toPorts:
         - ports:
             - port: "443"

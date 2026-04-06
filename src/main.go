@@ -141,9 +141,9 @@ func main() {
 		agentClient, err = agent.NewClient(client.KubeconfigPath())
 		if err != nil {
 			fmt.Printf("Warning: Failed to create agent client: %v\n", err)
-			fmt.Println("Agent debugging tool will not be available")
+			fmt.Println("DevOps agent tool will not be available")
 		} else {
-			fmt.Println("Agent debugging enabled (opencode integration)")
+			fmt.Println("DevOps agent enabled (opencode integration)")
 		}
 	}
 
@@ -208,9 +208,9 @@ func main() {
 			// Kubectl Command Pipeline (Write)
 			s.AddTool(tools.RunKubectlCommandTool(), handlers.RunKubectlCommand(client))
 
-			// Agent Debugging (Write — requires opencode CLI and env vars)
+			// DevOps Agent (Write — requires opencode CLI and env vars)
 			if agentClient != nil {
-				s.AddTool(tools.AgentDebugTool(), handlers.AgentDebug(agentClient))
+				s.AddTool(tools.DevopsAgentTool(), handlers.DevopsAgent(agentClient))
 			}
 		}
 	}

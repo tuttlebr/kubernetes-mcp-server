@@ -8,7 +8,7 @@ services:
       - KUBECONFIG=/home/appuser/.kube/config
       - SERVER_MODE=streamable-http
       - SERVER_PORT=8080
-      # Agent debugging (optional — omit to disable agentDebug tool)
+      # DevOps agent (optional — omit to disable devopsAgent tool)
       - OPENCODE_BASE_URL=${OPENCODE_BASE_URL:-}
       - OPENCODE_API_KEY=${OPENCODE_API_KEY:-}
       - OPENCODE_MODEL=${OPENCODE_MODEL:-}

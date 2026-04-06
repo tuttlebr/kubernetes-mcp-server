@@ -1,6 +1,6 @@
 # Kubernetes & Helm MCP Server
 
-A [Model Context Protocol (MCP)](https://modelcontextprotocol.io/) server that exposes **44 tools** for managing Kubernetes clusters and Helm releases through any MCP-compatible client. Built in Go for low resource overhead, it supports multi-cluster context switching, read-only mode, in-cluster or kubeconfig-based authentication, and **autonomous AI-driven debugging** via [opencode](https://github.com/anomalyco/opencode) integration.
+A [Model Context Protocol (MCP)](https://modelcontextprotocol.io/) server that exposes **44 tools** for managing Kubernetes clusters and Helm releases through any MCP-compatible client. Built in Go for low resource overhead, it supports multi-cluster context switching, read-only mode, in-cluster or kubeconfig-based authentication, and an **autonomous AI-driven DevOps agent** via [opencode](https://github.com/anomalyco/opencode) integration.
 
 ## Table of Contents
 
@@ -8,7 +8,7 @@ A [Model Context Protocol (MCP)](https://modelcontextprotocol.io/) server that e
 - [Architecture](#architecture)
 - [Quick Start](#quick-start)
 - [Configuration](#configuration)
-- [Agent Debugging](#agent-debugging)
+- [DevOps Agent](#devops-agent)
 - [Agent Skills](#agent-skills)
 - [Tool Reference](#tool-reference)
 - [Deployment](#deployment)
@@ -26,7 +26,7 @@ A [Model Context Protocol (MCP)](https://modelcontextprotocol.io/) server that e
 | **Monitoring**             | Cluster health checks, top pods/nodes by CPU or memory, resource quotas, limit ranges                                                              |
 | **Debugging**              | Pod debug info (conditions + events + logs), service endpoint health, network policy analysis, security context inspection, resource event history |
 | **Mutations**              | Create/update resources from JSON or YAML, delete resources, scale workloads, rollout restarts, exec in pods, manifest dry-run validation          |
-| **Agent Debugging**        | Autonomous AI agent that investigates cluster issues end-to-end using all available MCP tools, powered by any OpenAI-compatible LLM                |
+| **DevOps Agent**           | Autonomous AI agent that manages, deploys, and troubleshoots cluster workloads end-to-end using all available MCP tools, powered by any OpenAI-compatible LLM |
 | **Navigation**             | List namespaces, list/switch kubeconfig contexts, rollout status                                                                                   |
 
 **Helm Operations** — 9 tools for chart lifecycle management:
@@ -46,11 +46,11 @@ src/
 ├── tools/
 │   ├── k8s.go           # Kubernetes MCP tool definitions (schemas)
 │   ├── helm.go          # Helm MCP tool definitions (schemas)
-│   └── agent.go         # Agent debugging tool definition
+│   └── agent.go         # DevOps agent tool definition
 ├── handlers/
 │   ├── k8s.go           # Kubernetes tool handlers (request → response)
 │   ├── helm.go          # Helm tool handlers (request → response)
-│   └── agent.go         # Agent debugging handler
+│   └── agent.go         # DevOps agent handler
 └── pkg/
     ├── k8s/
     │   └── client.go    # Kubernetes client (dynamic, discovery, metrics, typed)
@@ -143,9 +143,9 @@ services:
 
 `--no-k8s` and `--no-helm` cannot be used together.
 
-### Agent Debugging Environment Variables
+### DevOps Agent Environment Variables
 
-These are **optional**. When all three are set, the `agentDebug` tool is registered (requires write mode).
+These are **optional**. When all three are set, the `devopsAgent` tool is registered (requires write mode).
 
 | Variable           | Description                                                         | Example                                |
 | ------------------ | ------------------------------------------------------------------- | -------------------------------------- |
@@ -163,17 +163,17 @@ These are **optional**. When all three are set, the `agentDebug` tool is registe
 
 All HTTP modes expose `GET /healthz` which verifies connectivity to the Kubernetes API server. Returns `200 ok` or `503 unhealthy: <error>`.
 
-## Agent Debugging
+## DevOps Agent
 
-The `agentDebug` tool launches an autonomous AI agent that investigates Kubernetes issues end-to-end. It uses [opencode](https://github.com/anomalyco/opencode) to run a headless agentic loop — the agent has access to all k8s and Helm MCP tools and will systematically inspect cluster state, logs, events, and configurations to produce a structured diagnosis.
+The `devopsAgent` tool launches an autonomous AI agent for Kubernetes cluster management. It uses [opencode](https://github.com/anomalyco/opencode) to run a headless agentic loop — the agent has access to all k8s and Helm MCP tools and can install, upgrade, debug, scale, and manage workloads autonomously, producing a structured report of actions taken and results.
 
 ### How It Works
 
-1. You call `agentDebug` with a natural language description of the issue
+1. You call `devopsAgent` with a natural language description of the task
 2. The server spawns `opencode run` as a headless subprocess
 3. OpenCode connects to a child k8s-mcp-server (stdio) for cluster access
-4. The agent autonomously calls MCP tools to investigate
-5. Returns a structured report: root cause, evidence, remediation steps, prevention
+4. The agent autonomously calls MCP tools to accomplish the task
+5. Returns a structured report: objective, actions taken, current state, issues found, next steps
 
 ### Prerequisites
 
@@ -193,7 +193,7 @@ kubectl -n k8s-mcp-server create secret generic k8s-mcp-agent-config \
   --dry-run=client -o yaml | kubectl apply -f -
 ```
 
-The deployment manifest references this Secret with `optional: true`, so the server works fine without it — the `agentDebug` tool simply won't be registered.
+The deployment manifest references this Secret with `optional: true`, so the server works fine without it — the `devopsAgent` tool simply won't be registered.
 
 ### Docker Compose
 
@@ -210,11 +210,11 @@ docker compose up
 
 | Parameter  | Required | Default | Description                                                          |
 | ---------- | -------- | ------- | -------------------------------------------------------------------- |
-| `prompt`   | Yes      | —       | Natural language description of the issue to debug                   |
+| `prompt`   | Yes      | —       | Natural language description of the task to perform                  |
 | `namespace`| No       | —       | Namespace to focus the investigation on                              |
 | `model`    | No       | env var | Override `OPENCODE_MODEL` for this run                               |
 | `timeout`  | No       | `300`   | Max execution time in seconds (max: 900)                             |
-| `readOnly` | No       | `true`  | When false, the agent can perform remediation actions on the cluster |
+| `readOnly` | No       | `false` | When true, restricts the agent to read-only inspection of the cluster |
 
 ## Agent Skills
 
@@ -335,7 +335,7 @@ Disabled when `--read-only` is set.
 | `scaleResource`      | Scale a workload's replica count          | `kind`\*, `name`\*, `namespace`\*, `replicas`\*   |
 | `execInPod`          | Execute a command in a pod container      | `name`\*, `namespace`\*, `command`\*, `container` |
 | `switchContext`      | Switch the active kubeconfig context      | `context`\*                                       |
-| `agentDebug`         | Autonomous AI debugging agent (requires opencode + LLM env vars) | `prompt`\*, `namespace`, `model`, `timeout`, `readOnly` |
+| `devopsAgent`        | Autonomous DevOps agent for cluster management (requires opencode + LLM env vars) | `prompt`\*, `namespace`, `model`, `timeout`, `readOnly` |
 
 ### Helm — Read-Only Tools (4)
 

@@ -22,7 +22,7 @@ type Config struct {
 	KubeconfigPath string
 }
 
-// Client orchestrates headless opencode runs for autonomous Kubernetes debugging.
+// Client orchestrates headless opencode runs for autonomous Kubernetes DevOps operations.
 type Client struct {
 	config Config
 }
@@ -63,7 +63,7 @@ func NewClient(kubeconfigPath string) (*Client, error) {
 	}, nil
 }
 
-// RunParams contains parameters for a single agent debugging run.
+// RunParams contains parameters for a single DevOps agent run.
 type RunParams struct {
 	Prompt    string
 	Namespace string
@@ -72,7 +72,7 @@ type RunParams struct {
 	ReadOnly  bool
 }
 
-// Run executes opencode headlessly with the given debugging prompt.
+// Run executes opencode headlessly with the given DevOps task prompt.
 func (c *Client) Run(ctx context.Context, params RunParams) (map[string]interface{}, error) {
 	opencodePath, err := exec.LookPath("opencode")
 	if err != nil {
@@ -208,16 +208,16 @@ func (c *Client) writeConfig(configPath string, params RunParams) error {
 func (c *Client) buildPrompt(params RunParams) string {
 	var sb strings.Builder
 
-	sb.WriteString("You are an autonomous Kubernetes debugging agent. ")
-	sb.WriteString("You have access to a comprehensive set of Kubernetes and Helm MCP tools. ")
-	sb.WriteString("Use them systematically to investigate the issue described below.\n\n")
+	sb.WriteString("You are an autonomous Kubernetes DevOps agent. ")
+	sb.WriteString("You have access to a comprehensive set of Kubernetes and Helm MCP tools for cluster management, deployment, and troubleshooting. ")
+	sb.WriteString("Use them systematically to accomplish the task described below.\n\n")
 
 	sb.WriteString("STRATEGY:\n")
-	sb.WriteString("1. Start with broad cluster/namespace overview (getClusterHealth, getClusterSummary, getEvents)\n")
-	sb.WriteString("2. Identify anomalies (failing pods, pending resources, error events)\n")
-	sb.WriteString("3. Drill down into specific resources (describeResource, getPodsLogs, getPodDebugInfo)\n")
-	sb.WriteString("4. Check related resources (getResourceOwners, getServiceEndpoints, getNetworkPolicies)\n")
-	sb.WriteString("5. For GPU issues, use the dedicated GPU tools (getGPUClusterOverview, diagnoseGPUScheduling, getGPUOperatorHealth)\n\n")
+	sb.WriteString("1. Assess the task: determine if it is an installation, upgrade, scaling, debugging, or general management operation\n")
+	sb.WriteString("2. For management tasks: use Helm tools (helmInstall, helmUpgrade) and resource mutation tools (createOrUpdateResourceJSON, createOrUpdateResourceYAML, scaleResource, rolloutRestart) as needed\n")
+	sb.WriteString("3. For debugging tasks: start broad (getClusterHealth, getClusterSummary, getEvents), then drill down (describeResource, getPodsLogs, getPodDebugInfo)\n")
+	sb.WriteString("4. Verify outcomes: after any mutation, confirm the desired state (getRolloutStatus, listResources, getEvents)\n")
+	sb.WriteString("5. For GPU workloads, use dedicated GPU tools (getGPUClusterOverview, diagnoseGPUScheduling, getGPUOperatorHealth)\n\n")
 
 	if params.ReadOnly {
 		sb.WriteString("MODE: READ-ONLY. You may only inspect and diagnose. Do NOT attempt any write operations.\n\n")
@@ -231,10 +231,11 @@ func (c *Client) buildPrompt(params RunParams) string {
 
 	sb.WriteString("REQUIRED OUTPUT FORMAT:\n")
 	sb.WriteString("Provide a structured summary with:\n")
-	sb.WriteString("- **Root Cause**: What is the underlying issue\n")
-	sb.WriteString("- **Evidence**: Which resources/logs/events led to this conclusion\n")
-	sb.WriteString("- **Remediation Steps**: Ordered list of actions to fix the issue\n")
-	sb.WriteString("- **Prevention**: How to prevent this in the future\n\n")
+	sb.WriteString("- **Objective**: What was requested\n")
+	sb.WriteString("- **Actions Taken**: What operations were performed and their results\n")
+	sb.WriteString("- **Current State**: The resulting cluster state after the operations\n")
+	sb.WriteString("- **Issues Found**: Any problems encountered (if applicable)\n")
+	sb.WriteString("- **Next Steps**: Recommended follow-up actions (if any)\n\n")
 
 	sb.WriteString("USER REQUEST:\n")
 	sb.WriteString(params.Prompt)
