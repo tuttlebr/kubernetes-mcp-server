@@ -89,6 +89,12 @@ functions:
     mcp_tool_name: getClusterHealth
     url: ${KUBERNETES_MCP_SERVER}
 
+  k8s_mcp_get_cluster_summary:
+    _type: mcp_tool_wrapper
+    description: Gets a concise high-level cluster status overview including active context, version, node health, namespace listing, workload health, pod phase counts, and recent warning events.
+    mcp_tool_name: getClusterSummary
+    url: ${KUBERNETES_MCP_SERVER}
+
   k8s_mcp_get_resource_quotas:
     _type: mcp_tool_wrapper
     description: Lists ResourceQuota objects and their current usage vs. limits. Useful for diagnosing quota exceeded errors.
@@ -149,6 +155,26 @@ functions:
     _type: mcp_tool_wrapper
     description: Validates a Kubernetes manifest without applying it (server-side dry-run). Checks for schema errors, missing required fields, and invalid values.
     mcp_tool_name: validateManifest
+    url: ${KUBERNETES_MCP_SERVER}
+
+  # ── Kubernetes — GPU Debugging & Troubleshooting ──────────────────────
+
+  k8s_mcp_get_gpu_cluster_overview:
+    _type: mcp_tool_wrapper
+    description: Gets a comprehensive overview of GPU resources across the cluster including GPU capacity, allocatable resources, workloads, node labels, taints, and recent GPU-related events.
+    mcp_tool_name: getGPUClusterOverview
+    url: ${KUBERNETES_MCP_SERVER}
+
+  k8s_mcp_diagnose_gpu_scheduling:
+    _type: mcp_tool_wrapper
+    description: Diagnoses why a specific pod cannot schedule on or use GPU nodes by checking requests, node capacity, taints, selectors, affinity, and events.
+    mcp_tool_name: diagnoseGPUScheduling
+    url: ${KUBERNETES_MCP_SERVER}
+
+  k8s_mcp_get_gpu_operator_health:
+    _type: mcp_tool_wrapper
+    description: Checks NVIDIA GPU operator and device plugin health, including daemonset status, operator pods, logs, node labels, runtime classes, and events.
+    mcp_tool_name: getGPUOperatorHealth
     url: ${KUBERNETES_MCP_SERVER}
 
   # ── Kubernetes — Navigation (Read-Only) ────────────────────────────────
@@ -213,6 +239,24 @@ functions:
     _type: mcp_tool_wrapper
     description: Switches the active kubeconfig context to connect to a different Kubernetes cluster. WRITE OPERATION.
     mcp_tool_name: switchContext
+    url: ${KUBERNETES_MCP_SERVER}
+
+  k8s_mcp_remediate_gpu_issue:
+    _type: mcp_tool_wrapper
+    description: Performs a GPU remediation action such as removing a taint, adding a GPU label, restarting the NVIDIA device plugin, restarting the GPU operator, or annotating a node. WRITE OPERATION.
+    mcp_tool_name: remediateGPUIssue
+    url: ${KUBERNETES_MCP_SERVER}
+
+  k8s_mcp_run_kubectl_command:
+    _type: mcp_tool_wrapper
+    description: Executes a direct kubectl command on the MCP server host. Requires kubectl in PATH. Pipes, redirects, shell expansions, and command chaining are not supported. WRITE OPERATION.
+    mcp_tool_name: runKubectlCommand
+    url: ${KUBERNETES_MCP_SERVER}
+
+  k8s_mcp_devops_agent:
+    _type: mcp_tool_wrapper
+    description: Launches an autonomous opencode-powered DevOps agent through the MCP server. In parent read-only mode the agent is forced to inspection-only behavior.
+    mcp_tool_name: devopsAgent
     url: ${KUBERNETES_MCP_SERVER}
 
   # ── Helm — Read-Only ───────────────────────────────────────────────────

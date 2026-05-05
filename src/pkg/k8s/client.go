@@ -8,6 +8,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"log"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -78,7 +79,7 @@ func NewClient(kubeconfigPath string) (*Client, error) {
 		if err != nil {
 			return nil, fmt.Errorf("failed to load kubeconfig from %s: %w", resolvedKubeconfigPath, err)
 		}
-		fmt.Printf("Using kubeconfig: %s\n", resolvedKubeconfigPath)
+		log.Printf("Using kubeconfig: %s", resolvedKubeconfigPath)
 	} else {
 		config, err = rest.InClusterConfig()
 		if err != nil {
@@ -88,12 +89,12 @@ func NewClient(kubeconfigPath string) (*Client, error) {
 				if err != nil {
 					return nil, fmt.Errorf("failed to create Kubernetes configuration: %w", err)
 				}
-				fmt.Printf("Using kubeconfig: %s\n", resolvedKubeconfigPath)
+				log.Printf("Using kubeconfig: %s", resolvedKubeconfigPath)
 			} else {
 				return nil, fmt.Errorf("failed to create Kubernetes configuration: %w", err)
 			}
 		} else {
-			fmt.Println("Using in-cluster ServiceAccount config")
+			log.Println("Using in-cluster ServiceAccount config")
 		}
 	}
 
@@ -150,6 +151,15 @@ func (c *Client) RunKubectlCommand(ctx context.Context, command string, timeoutS
 	if len(args) == 0 || args[0] != "kubectl" {
 		return nil, fmt.Errorf("command must start with 'kubectl', got: %q", command)
 	}
+	kubectlPath, err := exec.LookPath(args[0])
+	if err != nil {
+		return nil, fmt.Errorf("kubectl binary not found in PATH")
+	}
+	for _, arg := range args[1:] {
+		if isShellToken(arg) {
+			return nil, fmt.Errorf("shell syntax is not supported in kubectl commands: %q", arg)
+		}
+	}
 
 	// Clamp timeout
 	if timeoutSec <= 0 {
@@ -162,7 +172,7 @@ func (c *Client) RunKubectlCommand(ctx context.Context, command string, timeoutS
 	cmdCtx, cancel := context.WithTimeout(ctx, time.Duration(timeoutSec)*time.Second)
 	defer cancel()
 
-	cmd := exec.CommandContext(cmdCtx, args[0], args[1:]...)
+	cmd := exec.CommandContext(cmdCtx, kubectlPath, args[1:]...)
 
 	// Pass kubeconfig so kubectl targets the same cluster as the MCP server
 	cmd.Env = os.Environ()
@@ -174,7 +184,7 @@ func (c *Client) RunKubectlCommand(ctx context.Context, command string, timeoutS
 	cmd.Stdout = &stdout
 	cmd.Stderr = &stderr
 
-	err := cmd.Run()
+	err = cmd.Run()
 
 	result := map[string]interface{}{
 		"command": strings.Join(args, " "),
@@ -200,6 +210,15 @@ func (c *Client) RunKubectlCommand(ctx context.Context, command string, timeoutS
 	}
 
 	return result, nil
+}
+
+func isShellToken(arg string) bool {
+	switch arg {
+	case "|", "||", "&", "&&", ";", ">", ">>", "<", "<<", "2>", "2>>":
+		return true
+	default:
+		return false
+	}
 }
 
 // GetAPIResources retrieves all API resource types in the cluster.

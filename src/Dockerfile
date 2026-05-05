@@ -52,6 +52,19 @@ RUN case "${TARGETARCH}" in \
     chmod +x /usr/local/bin/helm && \
     rm -rf /tmp/helm.tar.gz /tmp/linux-${HELM_ARCH}
 
+# Install kubectl for the runKubectlCommand MCP tool (with checksum verification)
+ARG KUBECTL_VERSION=v1.34.1
+RUN case "${TARGETARCH}" in \
+      amd64) KUBECTL_ARCH=amd64 ;; \
+      arm64) KUBECTL_ARCH=arm64 ;; \
+      *) KUBECTL_ARCH=amd64 ;; \
+    esac && \
+    curl -fsSL "https://dl.k8s.io/release/${KUBECTL_VERSION}/bin/linux/${KUBECTL_ARCH}/kubectl" -o /usr/local/bin/kubectl && \
+    curl -fsSL "https://dl.k8s.io/release/${KUBECTL_VERSION}/bin/linux/${KUBECTL_ARCH}/kubectl.sha256" -o /tmp/kubectl.sha256 && \
+    echo "$(cat /tmp/kubectl.sha256)  /usr/local/bin/kubectl" | sha256sum -c - && \
+    chmod +x /usr/local/bin/kubectl && \
+    rm -f /tmp/kubectl.sha256
+
 # Set timezone
 ENV TZ=America/New_York
 
@@ -66,11 +79,15 @@ RUN chmod +x /usr/local/bin/k8s-mcp-server
 # Copy Bun runtime and opencode for DevOps agent
 COPY --from=opencode-installer /usr/local/bin/bun /usr/local/bin/bun
 COPY --from=opencode-installer --chown=1001:1001 /root/.bun/install/global /home/appuser/.bun/install/global
-RUN ln -s /home/appuser/.bun/install/global/node_modules/.bin/opencode /usr/local/bin/opencode
+RUN OPENCODE_BIN="$(find /home/appuser/.bun/install/global/node_modules -path '*/bin/opencode' -type f | grep 'linux.*musl' | head -n 1)" && \
+    test -n "${OPENCODE_BIN}" && \
+    ln -s "${OPENCODE_BIN}" /usr/local/bin/opencode
 
-# Create opencode config directory and install agent skills baked into the image
-RUN mkdir -p /home/appuser/.config/opencode/skills && \
-    chown -R appuser:appgroup /home/appuser/.config
+# Create opencode config, data, and cache directories.
+RUN mkdir -p /home/appuser/.config/opencode/skills \
+    /home/appuser/.local/share/opencode \
+    /home/appuser/.cache/opencode && \
+    chown -R appuser:appgroup /home/appuser/.config /home/appuser/.local /home/appuser/.cache
 COPY --chown=appuser:appgroup skills/ /home/appuser/.config/opencode/skills/
 
 # Switch to non-root user

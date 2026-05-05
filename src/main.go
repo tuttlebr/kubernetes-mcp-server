@@ -87,31 +87,36 @@ func main() {
 	var readOnly bool
 	var noK8s bool
 	var noHelm bool
+	var noAgent bool
 
 	flag.StringVar(&port, "port", getEnvOrDefault("SERVER_PORT", "8080"), "Server port")
 	flag.StringVar(&mode, "mode", getEnvOrDefault("SERVER_MODE", "sse"), "Server mode: 'stdio', 'sse', or 'streamable-http'")
 	flag.BoolVar(&readOnly, "read-only", false, "Enable read-only mode (disables write operations)")
 	flag.BoolVar(&noK8s, "no-k8s", false, "Disable Kubernetes tools")
 	flag.BoolVar(&noHelm, "no-helm", false, "Disable Helm tools")
+	flag.BoolVar(&noAgent, "no-agent", false, "Disable DevOps agent tool")
 	flag.Parse()
 
 	// Validate flag combinations
 	if noK8s && noHelm {
-		fmt.Println("Error: Cannot disable both Kubernetes and Helm tools. At least one tool category must be enabled.")
+		log.Println("Error: Cannot disable both Kubernetes and Helm tools. At least one tool category must be enabled.")
 		os.Exit(1)
 	}
 
 	// Log read-only mode status
 	if readOnly {
-		fmt.Println("Starting server in read-only mode - write operations disabled")
+		log.Println("Starting server in read-only mode - write operations disabled")
 	}
 
 	// Log disabled tool categories
 	if noK8s {
-		fmt.Println("Kubernetes tools disabled")
+		log.Println("Kubernetes tools disabled")
 	}
 	if noHelm {
-		fmt.Println("Helm tools disabled")
+		log.Println("Helm tools disabled")
+	}
+	if noAgent {
+		log.Println("DevOps agent disabled")
 	}
 
 	// Create MCP server
@@ -124,26 +129,26 @@ func main() {
 	// Create a Kubernetes client
 	client, err := k8s.NewClient("")
 	if err != nil {
-		fmt.Printf("Failed to create Kubernetes client: %v\n", err)
+		log.Printf("Failed to create Kubernetes client: %v", err)
 		return
 	}
 
 	// Create Helm client with default kubeconfig path
 	helmClient, err := helm.NewClient("")
 	if err != nil {
-		fmt.Printf("Failed to create Helm client: %v\n", err)
+		log.Printf("Failed to create Helm client: %v", err)
 		return
 	}
 
 	// Create agent client (optional — only if OPENCODE_BASE_URL is configured)
 	var agentClient *agent.Client
-	if os.Getenv("OPENCODE_BASE_URL") != "" {
+	if !noAgent && os.Getenv("OPENCODE_BASE_URL") != "" {
 		agentClient, err = agent.NewClient(client.KubeconfigPath())
 		if err != nil {
-			fmt.Printf("Warning: Failed to create agent client: %v\n", err)
-			fmt.Println("DevOps agent tool will not be available")
+			log.Printf("Warning: Failed to create agent client: %v", err)
+			log.Println("DevOps agent tool will not be available")
 		} else {
-			fmt.Println("DevOps agent enabled (opencode integration)")
+			log.Println("DevOps agent enabled (opencode integration)")
 		}
 	}
 
@@ -205,13 +210,15 @@ func main() {
 			// GPU Remediation (Write)
 			s.AddTool(tools.RemediateGPUIssueTool(), handlers.RemediateGPUIssue(client))
 
-			// Kubectl Command Pipeline (Write)
+			// Kubectl Command (Write)
 			s.AddTool(tools.RunKubectlCommandTool(), handlers.RunKubectlCommand(client))
 
-			// DevOps Agent (Write — requires opencode CLI and env vars)
-			if agentClient != nil {
-				s.AddTool(tools.DevopsAgentTool(), handlers.DevopsAgent(agentClient))
-			}
+		}
+
+		// DevOps Agent (requires opencode CLI and env vars). In parent
+		// read-only mode the handler forces inspection-only child runs.
+		if agentClient != nil {
+			s.AddTool(tools.DevopsAgentTool(), handlers.DevopsAgent(agentClient, readOnly))
 		}
 	}
 
@@ -238,13 +245,13 @@ func main() {
 
 	switch mode {
 	case "stdio":
-		fmt.Println("Starting server in stdio mode...")
+		log.Println("Starting server in stdio mode...")
 		if err := server.ServeStdio(s); err != nil {
-			fmt.Printf("Failed to start stdio server: %v\n", err)
+			log.Printf("Failed to start stdio server: %v", err)
 			return
 		}
 	case "sse":
-		fmt.Printf("Starting server in SSE mode on port %s...\n", port)
+		log.Printf("Starting server in SSE mode on port %s...", port)
 		httpServer := &http.Server{
 			Addr:              ":" + port,
 			ReadHeaderTimeout: 30 * time.Second,
@@ -268,21 +275,21 @@ func main() {
 
 		go func() {
 			if err := sse.Start(":" + port); err != nil && err != http.ErrServerClosed {
-				fmt.Printf("SSE server error: %v\n", err)
+				log.Printf("SSE server error: %v", err)
 			}
 		}()
-		fmt.Printf("SSE server started on port %s\n", port)
+		log.Printf("SSE server started on port %s", port)
 
 		<-ctx.Done()
-		fmt.Println("\nShutting down server...")
+		log.Println("Shutting down server...")
 		shutdownCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 		defer cancel()
 		if err := httpServer.Shutdown(shutdownCtx); err != nil {
-			fmt.Printf("Server shutdown error: %v\n", err)
+			log.Printf("Server shutdown error: %v", err)
 		}
 
 	case "streamable-http":
-		fmt.Printf("Starting server in streamable-http mode on port %s...\n", port)
+		log.Printf("Starting server in streamable-http mode on port %s...", port)
 		httpServer := &http.Server{
 			Addr:              ":" + port,
 			ReadHeaderTimeout: 30 * time.Second,
@@ -307,25 +314,25 @@ func main() {
 
 		go func() {
 			if err := streamableHTTP.Start(":" + port); err != nil && err != http.ErrServerClosed {
-				fmt.Printf("Streamable-http server error: %v\n", err)
+				log.Printf("Streamable-http server error: %v", err)
 			}
 		}()
-		fmt.Printf("Streamable-http server started on port %s (endpoint: http://localhost:%s/mcp)\n", port, port)
+		log.Printf("Streamable-http server started on port %s (endpoint: http://localhost:%s/mcp)", port, port)
 
 		<-ctx.Done()
-		fmt.Println("\nShutting down server...")
+		log.Println("Shutting down server...")
 		shutdownCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 		defer cancel()
 		if err := httpServer.Shutdown(shutdownCtx); err != nil {
-			fmt.Printf("Server shutdown error: %v\n", err)
+			log.Printf("Server shutdown error: %v", err)
 		}
 
 	default:
-		fmt.Printf("Unknown server mode: %s. Use 'stdio', 'sse', or 'streamable-http'.\n", mode)
+		log.Printf("Unknown server mode: %s. Use 'stdio', 'sse', or 'streamable-http'.", mode)
 		return
 	}
 
-	fmt.Println("Server stopped gracefully")
+	log.Println("Server stopped gracefully")
 }
 
 // getEnvOrDefault returns the value of the environment variable or the default value if not set

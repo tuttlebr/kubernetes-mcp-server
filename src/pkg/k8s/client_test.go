@@ -1,6 +1,8 @@
 package k8s
 
 import (
+	"context"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -209,6 +211,39 @@ func TestResolveKindName_UnknownPassthrough(t *testing.T) {
 	got := c.resolveKindName("something-unknown")
 	if got != "something-unknown" {
 		t.Errorf("expected passthrough for unknown kind, got %q", got)
+	}
+}
+
+func TestIsShellToken(t *testing.T) {
+	tests := []struct {
+		arg  string
+		want bool
+	}{
+		{"|", true},
+		{"&&", true},
+		{">", true},
+		{"pods", false},
+		{"--sort-by=cpu", false},
+	}
+
+	for _, tt := range tests {
+		got := isShellToken(tt.arg)
+		if got != tt.want {
+			t.Errorf("isShellToken(%q) = %v, want %v", tt.arg, got, tt.want)
+		}
+	}
+}
+
+func TestRunKubectlCommandMissingBinary(t *testing.T) {
+	t.Setenv("PATH", "")
+
+	c := &Client{}
+	_, err := c.RunKubectlCommand(context.Background(), "kubectl get pods", 1)
+	if err == nil {
+		t.Fatal("expected error when kubectl is missing")
+	}
+	if !strings.Contains(err.Error(), "kubectl binary not found in PATH") {
+		t.Fatalf("unexpected error: %v", err)
 	}
 }
 

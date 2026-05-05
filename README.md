@@ -1,6 +1,6 @@
 # Kubernetes & Helm MCP Server
 
-A [Model Context Protocol (MCP)](https://modelcontextprotocol.io/) server that exposes **44 tools** for managing Kubernetes clusters and Helm releases through any MCP-compatible client. Built in Go for low resource overhead, it supports multi-cluster context switching, read-only mode, in-cluster or kubeconfig-based authentication, and an **autonomous AI-driven DevOps agent** via [opencode](https://github.com/anomalyco/opencode) integration.
+A [Model Context Protocol (MCP)](https://modelcontextprotocol.io/) server that exposes **50 tools** for managing Kubernetes clusters and Helm releases through any MCP-compatible client. Built in Go for low resource overhead, it supports multi-cluster context switching, read-only mode, in-cluster or kubeconfig-based authentication, and an **autonomous AI-driven DevOps agent** via [opencode](https://github.com/anomalyco/opencode) integration.
 
 ## Table of Contents
 
@@ -18,7 +18,7 @@ A [Model Context Protocol (MCP)](https://modelcontextprotocol.io/) server that e
 
 ## Features
 
-**Kubernetes Operations** — 34 tools covering the full lifecycle of cluster resources:
+**Kubernetes Operations** — 41 tools covering the full lifecycle of cluster resources:
 
 | Category                   | Capabilities                                                                                                                                       |
 | -------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------- |
@@ -140,12 +140,13 @@ services:
 | `--read-only` | —                    | `false` | Disable all write operations                     |
 | `--no-k8s`    | —                    | `false` | Disable all Kubernetes tools                     |
 | `--no-helm`   | —                    | `false` | Disable all Helm tools                           |
+| `--no-agent`  | —                    | `false` | Disable the DevOps agent tool                    |
 
 `--no-k8s` and `--no-helm` cannot be used together.
 
 ### DevOps Agent Environment Variables
 
-These are **optional**. When all three are set, the `devopsAgent` tool is registered (requires write mode).
+These are **optional**. When all three are set, the `devopsAgent` tool is registered. In `--read-only` server mode, the agent is still available but is forced into inspection-only mode.
 
 | Variable           | Description                                                         | Example                                |
 | ------------------ | ------------------------------------------------------------------- | -------------------------------------- |
@@ -165,13 +166,13 @@ All HTTP modes expose `GET /healthz` which verifies connectivity to the Kubernet
 
 ## DevOps Agent
 
-The `devopsAgent` tool launches an autonomous AI agent for Kubernetes cluster management. It uses [opencode](https://github.com/anomalyco/opencode) to run a headless agentic loop — the agent has access to all k8s and Helm MCP tools and can install, upgrade, debug, scale, and manage workloads autonomously, producing a structured report of actions taken and results.
+The `devopsAgent` tool launches an autonomous AI agent for Kubernetes cluster management. It uses [opencode](https://github.com/anomalyco/opencode) to run a headless agentic loop — the agent has access to all k8s and Helm MCP tools and can install, upgrade, debug, scale, and manage workloads autonomously, producing a structured report of actions taken and results. In `--read-only` server mode, it can only inspect and diagnose.
 
 ### How It Works
 
 1. You call `devopsAgent` with a natural language description of the task
 2. The server spawns `opencode run` as a headless subprocess
-3. OpenCode connects to a child k8s-mcp-server (stdio) for cluster access
+3. OpenCode connects to a child k8s-mcp-server (stdio, `--no-agent`) for cluster access
 4. The agent autonomously calls MCP tools to accomplish the task
 5. Returns a structured report: objective, actions taken, current state, issues found, next steps
 
@@ -214,7 +215,7 @@ docker compose up
 | `namespace`| No       | —       | Namespace to focus the investigation on                              |
 | `model`    | No       | env var | Override `OPENCODE_MODEL` for this run                               |
 | `timeout`  | No       | `300`   | Max execution time in seconds (max: 900)                             |
-| `readOnly` | No       | `false` | When true, restricts the agent to read-only inspection of the cluster |
+| `readOnly` | No       | `false` | When true, restricts the agent to read-only inspection. Forced to true when the parent server runs with `--read-only` |
 
 ## Agent Skills
 
@@ -278,7 +279,7 @@ volumes:
 
 ## Tool Reference
 
-### Kubernetes — Read-Only Tools (27)
+### Kubernetes — Read-Only Tools (31)
 
 #### Discovery & Core
 
@@ -301,6 +302,7 @@ volumes:
 | Tool                | Description                                          | Key Parameters                    |
 | ------------------- | ---------------------------------------------------- | --------------------------------- |
 | `getClusterHealth`  | Cluster health report (nodes, control plane, events) | `includeMetrics`, `includeEvents` |
+| `getClusterSummary` | Concise cluster status overview                      | `includeNamespaceDetails`         |
 | `getTopPods`        | Top pods by CPU or memory usage                      | `namespace`, `sortBy`, `limit`    |
 | `getTopNodes`       | Top nodes by resource utilization                    | `sortBy`, `includeConditions`     |
 | `getNodeMetrics`    | CPU/memory metrics for a specific node               | `name`\*                          |
@@ -322,7 +324,15 @@ volumes:
 | `getResourceHistory`  | Recent events and changes for a resource           | `kind`\*, `name`\*, `namespace`, `hours`           |
 | `validateManifest`    | Dry-run validation of YAML/JSON manifests          | `manifest`\*, `format`, `strict`                   |
 
-### Kubernetes — Write Tools (8)
+#### GPU Debugging
+
+| Tool                     | Description                                      | Key Parameters                                      |
+| ------------------------ | ------------------------------------------------ | --------------------------------------------------- |
+| `getGPUClusterOverview`  | Cluster-wide GPU resource and workload overview  | `includeNonGPUNodes`, `includeEvents`               |
+| `diagnoseGPUScheduling`  | Diagnose GPU scheduling for a specific pod       | `podName`\*, `namespace`\*                          |
+| `getGPUOperatorHealth`   | NVIDIA operator and device plugin health check   | `devicePluginNamespace`, `gpuOperatorNamespace`     |
+
+### Kubernetes — Write Tools (9)
 
 Disabled when `--read-only` is set.
 
@@ -335,7 +345,14 @@ Disabled when `--read-only` is set.
 | `scaleResource`      | Scale a workload's replica count          | `kind`\*, `name`\*, `namespace`\*, `replicas`\*   |
 | `execInPod`          | Execute a command in a pod container      | `name`\*, `namespace`\*, `command`\*, `container` |
 | `switchContext`      | Switch the active kubeconfig context      | `context`\*                                       |
-| `devopsAgent`        | Autonomous DevOps agent for cluster management (requires opencode + LLM env vars) | `prompt`\*, `namespace`, `model`, `timeout`, `readOnly` |
+| `remediateGPUIssue`  | Apply GPU remediation actions             | `action`\*, `nodeName`, `taintKey`                |
+| `runKubectlCommand`  | Execute a direct kubectl command. Requires `kubectl` in PATH; included in the Docker image. | `command`\*, `timeout` |
+
+### Agent Tool
+
+| Tool          | Description                                                          | Key Parameters                                               |
+| ------------- | -------------------------------------------------------------------- | ------------------------------------------------------------ |
+| `devopsAgent` | Autonomous opencode-powered DevOps agent. Forced read-only when the parent server is read-only. | `prompt`\*, `namespace`, `model`, `timeout`, `readOnly` |
 
 ### Helm — Read-Only Tools (4)
 
@@ -443,12 +460,12 @@ The Docker image runs with a minimal attack surface:
 - **Non-root user** (`appuser`, UID 1001)
 - **Read-only root filesystem**
 - **All capabilities dropped**
-- **Minimal base image** (Alpine with only `ca-certificates`, `curl`, `tzdata`)
+- **Minimal base image** (Alpine with Helm, kubectl, opencode runtime dependencies, and health-check utilities)
 - **No privilege escalation** allowed
 
 ### Read-Only Mode
 
-Use `--read-only` to guarantee no cluster state changes. This disables all 13 write tools (8 Kubernetes + 5 Helm) while keeping all 31 read-only tools available.
+Use `--read-only` to guarantee no cluster state changes. This disables all 14 write tools (9 Kubernetes + 5 Helm), keeps all 31 read-only tools available, and forces `devopsAgent` into inspection-only mode.
 
 ### RBAC
 

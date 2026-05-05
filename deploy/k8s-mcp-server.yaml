@@ -181,6 +181,10 @@ spec:
               mountPath: /home/appuser/.cache/helm
             - name: helm-config
               mountPath: /home/appuser/.config/helm
+            - name: opencode-data
+              mountPath: /home/appuser/.local/share/opencode
+            - name: opencode-cache
+              mountPath: /home/appuser/.cache/opencode
           livenessProbe:
             httpGet:
               path: /healthz
@@ -212,6 +216,10 @@ spec:
         - name: helm-cache
           emptyDir: {}
         - name: helm-config
+          emptyDir: {}
+        - name: opencode-data
+          emptyDir: {}
+        - name: opencode-cache
           emptyDir: {}
 
 ---

@@ -18,6 +18,7 @@ mcp_tool_names:
 
   # Kubernetes — Monitoring & Observability (Read-Only)
   - getClusterHealth
+  - getClusterSummary
   - getResourceQuotas
   - getLimitRanges
   - getTopPods
@@ -51,6 +52,7 @@ mcp_tool_names:
   - switchContext
   - remediateGPUIssue
   - runKubectlCommand
+  - devopsAgent
 
   # Helm — Read-Only
   - helmList

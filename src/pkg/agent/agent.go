@@ -111,6 +111,7 @@ func (c *Client) Run(ctx context.Context, params RunParams) (map[string]interfac
 	cmd := exec.CommandContext(cmdCtx, opencodePath, "run", "--format", "json", "--model", model)
 	cmd.Dir = tmpDir
 	cmd.Env = append(os.Environ(),
+		"OPENCODE_CONFIG="+configPath,
 		"OPENCODE_BASE_URL="+c.config.BaseURL,
 		"OPENCODE_API_KEY="+c.config.APIKey,
 	)
@@ -123,8 +124,9 @@ func (c *Client) Run(ctx context.Context, params RunParams) (map[string]interfac
 	err = cmd.Run()
 
 	result := map[string]interface{}{
-		"prompt": params.Prompt,
-		"model":  model,
+		"prompt":   params.Prompt,
+		"model":    model,
+		"readOnly": params.ReadOnly,
 	}
 
 	if stderr.Len() > 0 {
@@ -153,12 +155,12 @@ func (c *Client) Run(ctx context.Context, params RunParams) (map[string]interfac
 
 // writeConfig generates the opencode.json configuration file.
 func (c *Client) writeConfig(configPath string, params RunParams) error {
-	childArgs := []interface{}{"--mode", "stdio"}
+	childArgs := []string{"--mode", "stdio", "--no-agent"}
 	if params.ReadOnly {
 		childArgs = append(childArgs, "--read-only")
 	}
 
-	command := []interface{}{c.config.BinaryPath}
+	command := []string{c.config.BinaryPath}
 	command = append(command, childArgs...)
 
 	environment := map[string]string{}
@@ -172,9 +174,14 @@ func (c *Client) writeConfig(configPath string, params RunParams) error {
 	}
 
 	config := map[string]interface{}{
+		"$schema":    "https://opencode.ai/config.json",
+		"model":      fmt.Sprintf("%s/%s", providerID, modelID),
+		"share":      "disabled",
+		"autoupdate": false,
 		"provider": map[string]interface{}{
 			providerID: map[string]interface{}{
-				"npm": "@ai-sdk/openai-compatible",
+				"npm":  "@ai-sdk/openai-compatible",
+				"name": providerID,
 				"models": map[string]interface{}{
 					modelID: map[string]interface{}{
 						"name":      modelID,
@@ -192,6 +199,8 @@ func (c *Client) writeConfig(configPath string, params RunParams) error {
 				"type":        "local",
 				"command":     command,
 				"environment": environment,
+				"enabled":     true,
+				"timeout":     30000,
 			},
 		},
 	}
@@ -214,7 +223,7 @@ func (c *Client) buildPrompt(params RunParams) string {
 
 	sb.WriteString("STRATEGY:\n")
 	sb.WriteString("1. Assess the task: determine if it is an installation, upgrade, scaling, debugging, or general management operation\n")
-	sb.WriteString("2. For management tasks: use Helm tools (helmInstall, helmUpgrade) and resource mutation tools (createOrUpdateResourceJSON, createOrUpdateResourceYAML, scaleResource, rolloutRestart) as needed\n")
+	sb.WriteString("2. For management tasks: use Helm tools (helmInstall, helmUpgrade) and resource mutation tools (createResource, createResourceYAML, scaleResource, rolloutRestart) as needed\n")
 	sb.WriteString("3. For debugging tasks: start broad (getClusterHealth, getClusterSummary, getEvents), then drill down (describeResource, getPodsLogs, getPodDebugInfo)\n")
 	sb.WriteString("4. Verify outcomes: after any mutation, confirm the desired state (getRolloutStatus, listResources, getEvents)\n")
 	sb.WriteString("5. For GPU workloads, use dedicated GPU tools (getGPUClusterOverview, diagnoseGPUScheduling, getGPUOperatorHealth)\n\n")
@@ -246,6 +255,7 @@ func (c *Client) buildPrompt(params RunParams) string {
 // parseNDJSON extracts the assistant's text output from opencode's NDJSON stream.
 func (c *Client) parseNDJSON(data []byte) string {
 	var textParts []string
+	var errorParts []string
 
 	scanner := bufio.NewScanner(bytes.NewReader(data))
 	scanner.Buffer(make([]byte, 0, 1024*1024), 1024*1024)
@@ -261,24 +271,49 @@ func (c *Client) parseNDJSON(data []byte) string {
 			continue
 		}
 
-		eventType, _ := event["type"].(string)
-		if eventType != "text" {
-			continue
-		}
-
-		// Extract text from part object: {"type":"text","part":{"type":"text","text":"..."}}
-		if part, ok := event["part"].(map[string]interface{}); ok {
-			if text, ok := part["text"].(string); ok && text != "" {
-				textParts = append(textParts, text)
+		switch eventType, _ := event["type"].(string); eventType {
+		case "text":
+			// Extract text from part object: {"type":"text","part":{"type":"text","text":"..."}}
+			if part, ok := event["part"].(map[string]interface{}); ok {
+				if text, ok := part["text"].(string); ok && text != "" {
+					textParts = append(textParts, text)
+				}
+			}
+		case "error":
+			if message := extractErrorMessage(event["error"]); message != "" {
+				errorParts = append(errorParts, message)
 			}
 		}
 	}
 
 	if len(textParts) == 0 {
+		if len(errorParts) > 0 {
+			return strings.Join(errorParts, "\n")
+		}
 		return string(data)
 	}
 
 	return strings.Join(textParts, "")
+}
+
+func extractErrorMessage(value interface{}) string {
+	errorObj, ok := value.(map[string]interface{})
+	if !ok {
+		return ""
+	}
+
+	if dataObj, ok := errorObj["data"].(map[string]interface{}); ok {
+		if message, ok := dataObj["message"].(string); ok {
+			return message
+		}
+	}
+	if message, ok := errorObj["message"].(string); ok {
+		return message
+	}
+	if name, ok := errorObj["name"].(string); ok {
+		return name
+	}
+	return ""
 }
 
 // parseModel splits a "provider/model" string into its components.

@@ -9,7 +9,7 @@ import (
 )
 
 // DevopsAgent returns a handler function for the devopsAgent tool.
-func DevopsAgent(agentClient *agent.Client) func(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+func DevopsAgent(agentClient *agent.Client, forceReadOnly bool) func(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 	return func(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 		args, ok := request.Params.Arguments.(map[string]interface{})
 		if !ok {
@@ -24,6 +24,9 @@ func DevopsAgent(agentClient *agent.Client) func(ctx context.Context, request mc
 		namespace := getStringArg(args, "namespace", "")
 		model := getStringArg(args, "model", "")
 		readOnly := getBoolArg(args, "readOnly", false)
+		if forceReadOnly {
+			readOnly = true
+		}
 
 		timeout := 300
 		if val, ok := args["timeout"]; ok {

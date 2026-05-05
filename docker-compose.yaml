@@ -14,6 +14,12 @@ services:
       - OPENCODE_MODEL=${OPENCODE_MODEL:-}
     volumes:
       - ./kube:/home/appuser/.kube
+      - opencode-data:/home/appuser/.local/share/opencode
+      - opencode-cache:/home/appuser/.cache/opencode
     ports:
       - 8080:8080
     restart: unless-stopped
+
+volumes:
+  opencode-data:
+  opencode-cache:

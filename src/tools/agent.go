@@ -14,7 +14,7 @@ func DevopsAgentTool() mcp.Tool {
 			"Provide a natural language description of what you need — the agent will autonomously execute the required operations "+
 			"and produce a structured report. "+
 			"Requires: opencode CLI installed, OPENCODE_BASE_URL, OPENCODE_API_KEY, and OPENCODE_MODEL env vars set. "+
-			"WRITE OPERATION: only available when server is not in read-only mode."),
+			"When the parent MCP server runs in read-only mode, this tool is forced into inspection-only mode."),
 		mcp.WithString("prompt", mcp.Required(),
 			mcp.Description("Natural language description of the Kubernetes task to perform. "+
 				"Be specific: include resource names, namespaces, chart names, or error messages. "+
@@ -38,7 +38,7 @@ func DevopsAgentTool() mcp.Tool {
 			mcp.Description("When true, the child k8s-mcp-server runs in read-only mode, "+
 				"preventing the agent from making any cluster changes. "+
 				"Defaults to false, allowing the agent to perform management and remediation actions. "+
-				"Set to true for inspection-only runs."),
+				"Set to true for inspection-only runs. Parent server read-only mode always overrides this to true."),
 			mcp.DefaultBool(false)),
 	)
 }

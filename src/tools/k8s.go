@@ -659,23 +659,22 @@ func GetClusterSummaryTool() mcp.Tool {
 	)
 }
 
-// RunKubectlCommandTool creates a tool for executing arbitrary kubectl pipelines.
+// RunKubectlCommandTool creates a tool for executing direct kubectl commands.
 func RunKubectlCommandTool() mcp.Tool {
 	return mcp.NewTool(
 		"runKubectlCommand",
-		mcp.WithDescription("Execute an arbitrary kubectl command pipeline on the MCP server host. "+
-			"The command must start with 'kubectl' and may pipe through standard UNIX tools "+
-			"(jq, grep, awk, sort, head, tail, wc, cut, sed, tr, uniq, xargs, column). "+
-			"Use this when the structured MCP tools do not expose the exact data you need, "+
-			"or when you need to combine kubectl output with text processing. "+
+		mcp.WithDescription("Execute a direct kubectl command on the MCP server host. "+
+			"Requires the kubectl binary to be available in PATH. "+
+			"The command must start with 'kubectl' and is executed without shell interpretation, "+
+			"so pipes, redirects, shell expansions, and command chaining are not supported. "+
+			"Use this when the structured MCP tools do not expose the exact data you need. "+
 			"Examples: "+
-			"\"kubectl get nodes -o json | jq -r '.items[] | .status.allocatable[\\\"nvidia.com/gpu\\\"] // \\\"0\\\"' | awk '{sum+=$1} END{print sum}'\", "+
 			"\"kubectl get pods -A --field-selector=status.phase=Pending -o wide\", "+
 			"\"kubectl top nodes --sort-by=cpu\". "+
 			"WRITE OPERATION: only available when server is not in read-only mode."),
 		mcp.WithString("command", mcp.Required(),
-			mcp.Description("The full shell command to execute. Must start with 'kubectl'. "+
-				"Pipe operators (|) and standard UNIX text-processing tools are allowed.")),
+			mcp.Description("The full kubectl command to execute. Must start with 'kubectl'. "+
+				"Shell syntax such as pipes and redirects is not supported.")),
 		mcp.WithNumber("timeout",
 			mcp.Description("Maximum execution time in seconds. Default: 30. Max: 300."),
 			mcp.DefaultNumber(30)),
