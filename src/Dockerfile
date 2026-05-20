@@ -88,7 +88,6 @@ RUN mkdir -p /home/appuser/.config/opencode/skills \
     /home/appuser/.local/share/opencode \
     /home/appuser/.cache/opencode && \
     chown -R appuser:appgroup /home/appuser/.config /home/appuser/.local /home/appuser/.cache
-COPY --chown=appuser:appgroup skills/ /home/appuser/.config/opencode/skills/
 
 # Switch to non-root user
 USER appuser

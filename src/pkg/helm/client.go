@@ -58,6 +58,9 @@ func NewClient(kubeconfig string) (*Client, error) {
 	if err != nil {
 		return nil, fmt.Errorf("failed to get Kubernetes config: %w", err)
 	}
+	if restConfig.Timeout == 0 {
+		restConfig.Timeout = 30 * time.Second
+	}
 
 	// Create Kubernetes client
 	k8sClient, err := kubernetes.NewForConfig(restConfig)

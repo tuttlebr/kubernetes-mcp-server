@@ -119,6 +119,29 @@ func TestWriteConfigReadOnlyAndModelOverride(t *testing.T) {
 	}
 }
 
+func TestWriteConfigCopiesCapabilityEnv(t *testing.T) {
+	t.Setenv("MCP_ENABLE_EXEC", "true")
+	t.Setenv("MCP_ENABLE_KUBECTL", "true")
+
+	client := newTestAgentClient()
+	configPath := filepath.Join(t.TempDir(), "opencode.json")
+
+	if err := client.writeConfig(configPath, RunParams{}); err != nil {
+		t.Fatalf("writeConfig failed: %v", err)
+	}
+
+	config := readConfig(t, configPath)
+	mcp := config["mcp"].(map[string]interface{})
+	k8s := mcp["k8s"].(map[string]interface{})
+	env := k8s["environment"].(map[string]interface{})
+	if env["MCP_ENABLE_EXEC"] != "true" {
+		t.Fatalf("MCP_ENABLE_EXEC was not propagated: %#v", env)
+	}
+	if env["MCP_ENABLE_KUBECTL"] != "true" {
+		t.Fatalf("MCP_ENABLE_KUBECTL was not propagated: %#v", env)
+	}
+}
+
 func TestParseNDJSONTextEvents(t *testing.T) {
 	client := newTestAgentClient()
 	data := []byte(`{"type":"step_start","part":{"type":"step-start"}}` + "\n" +

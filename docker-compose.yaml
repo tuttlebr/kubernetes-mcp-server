@@ -8,6 +8,8 @@ services:
       - KUBECONFIG=/home/appuser/.kube/config
       - SERVER_MODE=streamable-http
       - SERVER_PORT=8080
+      - SERVER_READ_ONLY=true
+      - MCP_AUTH_TOKEN=${MCP_AUTH_TOKEN:-}
       # DevOps agent (optional — omit to disable devopsAgent tool)
       - OPENCODE_BASE_URL=${OPENCODE_BASE_URL:-}
       - OPENCODE_API_KEY=${OPENCODE_API_KEY:-}

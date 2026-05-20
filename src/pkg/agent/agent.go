@@ -167,6 +167,8 @@ func (c *Client) writeConfig(configPath string, params RunParams) error {
 	if c.config.KubeconfigPath != "" {
 		environment["KUBECONFIG"] = c.config.KubeconfigPath
 	}
+	copyEnvIfSet(environment, "MCP_ENABLE_EXEC")
+	copyEnvIfSet(environment, "MCP_ENABLE_KUBECTL")
 
 	providerID, modelID := parseModel(c.config.Model)
 	if params.Model != "" {
@@ -211,6 +213,12 @@ func (c *Client) writeConfig(configPath string, params RunParams) error {
 	}
 
 	return os.WriteFile(configPath, data, 0600)
+}
+
+func copyEnvIfSet(environment map[string]string, key string) {
+	if value := os.Getenv(key); value != "" {
+		environment[key] = value
+	}
 }
 
 // buildPrompt constructs the full prompt including system instructions.

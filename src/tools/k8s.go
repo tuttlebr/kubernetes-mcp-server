@@ -522,15 +522,15 @@ func ExecInPodTool() mcp.Tool {
 		"execInPod",
 		mcp.WithDescription("Execute a command inside a running pod container, similar to 'kubectl exec'. "+
 			"Returns the command's stdout and stderr. Use for debugging, inspecting container filesystems, "+
-			"or running one-off commands. "+
-			"WRITE OPERATION: only available when server is not in read-only mode."),
+			"or running one-off commands. The command is split into argv without shell interpretation. "+
+			"DANGEROUS OPERATION: only available when server is not in read-only mode and exec capability is explicitly enabled."),
 		mcp.WithString("name", mcp.Required(),
 			mcp.Description("Exact name of the pod.")),
 		mcp.WithString("namespace", mcp.Required(),
 			mcp.Description("Namespace where the pod is running.")),
 		mcp.WithString("command", mcp.Required(),
-			mcp.Description("Command to execute as a single string. It will be passed to the container's shell. "+
-				"Examples: \"ls -la /app\", \"cat /etc/config/settings.yaml\", \"env | grep DATABASE\".")),
+			mcp.Description("Command to execute as a single string. Shell pipes, redirects, and expansions are not interpreted. "+
+				"Examples: \"ls -la /app\", \"cat /etc/config/settings.yaml\", \"printenv DATABASE_URL\".")),
 		mcp.WithString("container",
 			mcp.Description("Target container name within the pod. Required if the pod has multiple containers. "+
 				"Omit if the pod has only one container.")),
@@ -671,7 +671,7 @@ func RunKubectlCommandTool() mcp.Tool {
 			"Examples: "+
 			"\"kubectl get pods -A --field-selector=status.phase=Pending -o wide\", "+
 			"\"kubectl top nodes --sort-by=cpu\". "+
-			"WRITE OPERATION: only available when server is not in read-only mode."),
+			"DANGEROUS OPERATION: only available when server is not in read-only mode and kubectl capability is explicitly enabled."),
 		mcp.WithString("command", mcp.Required(),
 			mcp.Description("The full kubectl command to execute. Must start with 'kubectl'. "+
 				"Shell syntax such as pipes and redirects is not supported.")),
@@ -685,10 +685,8 @@ func RunKubectlCommandTool() mcp.Tool {
 func SwitchContextTool() mcp.Tool {
 	return mcp.NewTool(
 		"switchContext",
-		mcp.WithDescription("Switch the active kubeconfig context to connect to a different Kubernetes cluster. "+
-			"All subsequent operations will target the new cluster. "+
-			"Use listContexts first to see available context names. "+
-			"WRITE OPERATION: only available when server is not in read-only mode."),
+		mcp.WithDescription("Deprecated and not registered by default. Process-global context switching is unsafe for concurrent HTTP MCP usage. "+
+			"Run separate server instances or use a request/session-scoped multi-cluster model instead."),
 		mcp.WithString("context", mcp.Required(),
 			mcp.Description("Exact name of the kubeconfig context to switch to. "+
 				"Use listContexts to discover available context names.")),

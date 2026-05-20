@@ -44,6 +44,7 @@ import (
 // discovery, and metrics clients.
 // It also caches API resource information for performance.
 const gvrCacheTTL = 5 * time.Minute
+const dynamicListPageLimit int64 = 500
 
 type Client struct {
 	clientset        *kubernetes.Clientset
@@ -296,9 +297,9 @@ func (c *Client) ListResources(ctx context.Context, kind, namespace, labelSelect
 
 	var list *unstructured.UnstructuredList
 	if namespace != "" {
-		list, err = c.dynamicClient.Resource(*gvr).Namespace(namespace).List(ctx, options)
+		list, err = listDynamicResources(ctx, c.dynamicClient.Resource(*gvr).Namespace(namespace), options)
 	} else {
-		list, err = c.dynamicClient.Resource(*gvr).List(ctx, options)
+		list, err = listDynamicResources(ctx, c.dynamicClient.Resource(*gvr), options)
 	}
 
 	// Fallback: if the API rejects the field selector, retry without it
@@ -306,9 +307,9 @@ func (c *Client) ListResources(ctx context.Context, kind, namespace, labelSelect
 	if err != nil && fieldSelector != "" && strings.Contains(err.Error(), "is not a known field selector") {
 		options.FieldSelector = ""
 		if namespace != "" {
-			list, err = c.dynamicClient.Resource(*gvr).Namespace(namespace).List(ctx, options)
+			list, err = listDynamicResources(ctx, c.dynamicClient.Resource(*gvr).Namespace(namespace), options)
 		} else {
-			list, err = c.dynamicClient.Resource(*gvr).List(ctx, options)
+			list, err = listDynamicResources(ctx, c.dynamicClient.Resource(*gvr), options)
 		}
 		if err != nil {
 			return nil, fmt.Errorf("failed to list resources: %w", err)
@@ -327,6 +328,26 @@ func (c *Client) ListResources(ctx context.Context, kind, namespace, labelSelect
 	}
 
 	return resources, nil
+}
+
+func listDynamicResources(ctx context.Context, resource dynamic.ResourceInterface, options metav1.ListOptions) (*unstructured.UnstructuredList, error) {
+	if options.Limit == 0 {
+		options.Limit = dynamicListPageLimit
+	}
+
+	combined := &unstructured.UnstructuredList{}
+	for {
+		page, err := resource.List(ctx, options)
+		if err != nil {
+			return nil, err
+		}
+		combined.Items = append(combined.Items, page.Items...)
+		if page.GetContinue() == "" {
+			combined.SetResourceVersion(page.GetResourceVersion())
+			return combined, nil
+		}
+		options.Continue = page.GetContinue()
+	}
 }
 
 // filterByFieldSelector applies a Kubernetes-style field selector client-side.
@@ -461,11 +482,8 @@ func normalizeSecretData(obj *unstructured.Unstructured) {
 	}
 }
 
-// CreateOrUpdateResource creates a new resource or updates an existing one.
-// It parses the provided manifest string into an unstructured object.
-// It uses the dynamic client to first attempt an update, and if that fails
-// (e.g., resource not found), it attempts to create the resource.
-// Requires the resource manifest to include a name.
+// CreateOrUpdateResource creates or updates a resource via server-side apply.
+// Requires the resource manifest to include apiVersion, kind, and metadata.name.
 // Returns the unstructured content of the created/updated resource, or an error.
 func (c *Client) CreateOrUpdateResourceJSON(ctx context.Context, namespace, manifestJSON, kind string) (map[string]interface{}, error) {
 	// Decode JSON into unstructured object directly (no YAML conversion)
@@ -475,57 +493,12 @@ func (c *Client) CreateOrUpdateResourceJSON(ctx context.Context, namespace, mani
 		return nil, fmt.Errorf("failed to parse resource manifest JSON: %w", err)
 	}
 
-	gvr, err := c.getCachedGVR(kind)
-	if err != nil {
-		return nil, err
-	}
-
-	if namespace != "" {
-		obj.SetNamespace(namespace)
-	}
-
-	if obj.GetName() == "" {
-		return nil, fmt.Errorf("resource name is required")
-	}
-
-	// Normalize Secret data encoding before sending to the API
-	normalizeSecretData(obj)
-
-	var resource dynamic.ResourceInterface
-	if obj.GetNamespace() != "" {
-		resource = c.dynamicClient.Resource(*gvr).Namespace(obj.GetNamespace())
-	} else {
-		resource = c.dynamicClient.Resource(*gvr)
-	}
-
-	// Marshal the (possibly normalized) object for the patch payload
-	rawJSON, err := json.Marshal(obj.Object)
-	if err != nil {
-		return nil, fmt.Errorf("failed to marshal resource: %w", err)
-	}
-
-	// Try to patch; if not found, create
-	result, err := resource.Patch(
-		ctx,
-		obj.GetName(),
-		types.MergePatchType,
-		rawJSON,
-		metav1.PatchOptions{},
-	)
-	if errors.IsNotFound(err) {
-		result, err = resource.Create(ctx, obj, metav1.CreateOptions{})
-	}
-	if err != nil {
-		return nil, fmt.Errorf("failed to create or patch resource: %w", err)
-	}
-
-	return result.UnstructuredContent(), nil
+	return c.applyResource(ctx, namespace, kind, obj)
 }
 
 // CreateOrUpdateResourceYAML creates a new resource or updates an existing one from a YAML manifest.
 // This function is specifically designed for YAML input and provides optimized YAML parsing.
-// It converts the YAML manifest to JSON internally and then uses the dynamic client
-// to first attempt an update, and if that fails (e.g., resource not found), it attempts to create the resource.
+// It converts the YAML manifest to JSON internally and applies it with server-side apply.
 // Requires the resource manifest to include a name.
 // Returns the unstructured content of the created/updated resource, or an error.
 //
@@ -559,23 +532,35 @@ func (c *Client) CreateOrUpdateResourceYAML(ctx context.Context, namespace, yaml
 		return nil, fmt.Errorf("failed to parse converted JSON from YAML manifest: %w", err)
 	}
 
-	// Determine the resource GVR
-	gvr, err := c.getCachedGVR(kind)
-	if err != nil {
-		return nil, err
-	}
+	return c.applyResource(ctx, namespace, kind, obj)
+}
 
-	// Set namespace if provided (overrides manifest namespace)
+func (c *Client) applyResource(ctx context.Context, namespace, kind string, obj *unstructured.Unstructured) (map[string]interface{}, error) {
+	if kind == "" {
+		kind = obj.GetKind()
+	}
+	if kind == "" {
+		return nil, fmt.Errorf("resource kind is required in the manifest or kind parameter")
+	}
+	if obj.GetAPIVersion() == "" {
+		return nil, fmt.Errorf("resource apiVersion is required")
+	}
+	if obj.GetKind() == "" {
+		obj.SetKind(kind)
+	}
+	if obj.GetName() == "" {
+		return nil, fmt.Errorf("resource name is required")
+	}
 	if namespace != "" {
 		obj.SetNamespace(namespace)
 	}
 
-	if obj.GetName() == "" {
-		return nil, fmt.Errorf("resource name is required in YAML manifest")
-	}
-
-	// Normalize Secret data encoding before sending to the API
 	normalizeSecretData(obj)
+
+	gvr, err := c.getCachedGVR(kind)
+	if err != nil {
+		return nil, err
+	}
 
 	var resource dynamic.ResourceInterface
 	if obj.GetNamespace() != "" {
@@ -584,25 +569,20 @@ func (c *Client) CreateOrUpdateResourceYAML(ctx context.Context, namespace, yaml
 		resource = c.dynamicClient.Resource(*gvr)
 	}
 
-	// Re-marshal the (possibly normalized) object for the patch payload
-	jsonData, err = json.Marshal(obj.Object)
+	rawJSON, err := json.Marshal(obj.Object)
 	if err != nil {
 		return nil, fmt.Errorf("failed to marshal resource: %w", err)
 	}
 
-	// Try to patch; if not found, create
 	result, err := resource.Patch(
 		ctx,
 		obj.GetName(),
-		types.MergePatchType,
-		jsonData,
-		metav1.PatchOptions{},
+		types.ApplyPatchType,
+		rawJSON,
+		metav1.PatchOptions{FieldManager: "k8s-mcp-server"},
 	)
-	if errors.IsNotFound(err) {
-		result, err = resource.Create(ctx, obj, metav1.CreateOptions{})
-	}
 	if err != nil {
-		return nil, fmt.Errorf("failed to create or patch resource from YAML manifest: %w", err)
+		return nil, fmt.Errorf("failed to apply resource: %w", err)
 	}
 
 	return result.UnstructuredContent(), nil
@@ -1182,7 +1162,7 @@ func (c *Client) GetNamespaceResources(ctx context.Context, namespace string, ty
 				Resource: resource.Name,
 			}
 
-			list, err := c.dynamicClient.Resource(gvr).Namespace(namespace).List(ctx, metav1.ListOptions{})
+			list, err := listDynamicResources(ctx, c.dynamicClient.Resource(gvr).Namespace(namespace), metav1.ListOptions{})
 			if err != nil {
 				continue // Skip resources we can't list
 			}
@@ -1347,9 +1327,9 @@ func (c *Client) findOwnedResources(ctx context.Context, ownerUID, namespace str
 
 			var list *unstructured.UnstructuredList
 			if resource.Namespaced && namespace != "" {
-				list, err = c.dynamicClient.Resource(gvr).Namespace(namespace).List(ctx, metav1.ListOptions{})
+				list, err = listDynamicResources(ctx, c.dynamicClient.Resource(gvr).Namespace(namespace), metav1.ListOptions{})
 			} else if !resource.Namespaced {
-				list, err = c.dynamicClient.Resource(gvr).List(ctx, metav1.ListOptions{})
+				list, err = listDynamicResources(ctx, c.dynamicClient.Resource(gvr), metav1.ListOptions{})
 			} else {
 				continue
 			}

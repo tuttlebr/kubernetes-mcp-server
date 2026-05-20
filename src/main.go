@@ -11,22 +11,24 @@ package main
 
 import (
 	"context"
+	"crypto/subtle"
 	"flag"
 	"fmt"
 	"log"
 	"net/http"
 	"os"
 	"os/signal"
+	"strings"
 	"syscall"
 	"time"
 
+	"github.com/mark3labs/mcp-go/mcp"
+	"github.com/mark3labs/mcp-go/server"
 	"github.com/tuttlebr/kubernetes-mcp-server/handlers"
 	"github.com/tuttlebr/kubernetes-mcp-server/pkg/agent"
 	"github.com/tuttlebr/kubernetes-mcp-server/pkg/helm"
 	"github.com/tuttlebr/kubernetes-mcp-server/pkg/k8s"
 	"github.com/tuttlebr/kubernetes-mcp-server/tools"
-
-	"github.com/mark3labs/mcp-go/server"
 )
 
 // loggingMiddleware wraps an http.Handler and logs each request
@@ -48,6 +50,60 @@ func loggingMiddleware(next http.Handler) http.Handler {
 			rw.statusCode,
 			time.Since(start),
 		)
+	})
+}
+
+func authMiddleware(next http.Handler, token string) http.Handler {
+	if token == "" {
+		return next
+	}
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/healthz" {
+			next.ServeHTTP(w, r)
+			return
+		}
+		if authorizedRequest(r, token) {
+			next.ServeHTTP(w, r)
+			return
+		}
+		w.Header().Set("WWW-Authenticate", `Bearer realm="k8s-mcp-server"`)
+		http.Error(w, "unauthorized", http.StatusUnauthorized)
+	})
+}
+
+func authorizedRequest(r *http.Request, token string) bool {
+	authHeader := r.Header.Get("Authorization")
+	if strings.HasPrefix(authHeader, "Bearer ") && constantTimeEqual(strings.TrimPrefix(authHeader, "Bearer "), token) {
+		return true
+	}
+	return constantTimeEqual(r.Header.Get("X-MCP-Token"), token)
+}
+
+func constantTimeEqual(got, want string) bool {
+	if got == "" || want == "" {
+		return false
+	}
+	return subtle.ConstantTimeCompare([]byte(got), []byte(want)) == 1
+}
+
+func addAuditedTool(s *server.MCPServer, tool mcp.Tool, capability string, handler server.ToolHandlerFunc) {
+	s.AddTool(tool, func(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+		start := time.Now()
+		result, err := handler(ctx, request)
+		status := "ok"
+		if err != nil {
+			status = "error"
+		} else if result != nil && result.IsError {
+			status = "tool_error"
+		}
+		if err != nil {
+			log.Printf("mcp_tool_call tool=%s capability=%s status=%s duration=%s error=%q",
+				tool.Name, capability, status, time.Since(start), err.Error())
+		} else {
+			log.Printf("mcp_tool_call tool=%s capability=%s status=%s duration=%s",
+				tool.Name, capability, status, time.Since(start))
+		}
+		return result, err
 	})
 }
 
@@ -88,14 +144,27 @@ func main() {
 	var noK8s bool
 	var noHelm bool
 	var noAgent bool
+	var enableExec bool
+	var enableKubectl bool
+	var enableAgentWrite bool
 
 	flag.StringVar(&port, "port", getEnvOrDefault("SERVER_PORT", "8080"), "Server port")
 	flag.StringVar(&mode, "mode", getEnvOrDefault("SERVER_MODE", "sse"), "Server mode: 'stdio', 'sse', or 'streamable-http'")
-	flag.BoolVar(&readOnly, "read-only", false, "Enable read-only mode (disables write operations)")
+	flag.BoolVar(&readOnly, "read-only", getEnvBoolDefault("SERVER_READ_ONLY", false), "Enable read-only mode (disables write operations)")
 	flag.BoolVar(&noK8s, "no-k8s", false, "Disable Kubernetes tools")
 	flag.BoolVar(&noHelm, "no-helm", false, "Disable Helm tools")
 	flag.BoolVar(&noAgent, "no-agent", false, "Disable DevOps agent tool")
+	flag.BoolVar(&enableExec, "enable-exec", getEnvBoolDefault("MCP_ENABLE_EXEC", false), "Enable execInPod tool when not in read-only mode")
+	flag.BoolVar(&enableKubectl, "enable-kubectl", getEnvBoolDefault("MCP_ENABLE_KUBECTL", false), "Enable runKubectlCommand tool when not in read-only mode")
+	flag.BoolVar(&enableAgentWrite, "enable-agent-write", getEnvBoolDefault("MCP_ENABLE_AGENT_WRITE", false), "Allow devopsAgent to run write-capable child MCP sessions when server is not read-only")
 	flag.Parse()
+
+	authToken := os.Getenv("MCP_AUTH_TOKEN")
+	requireAuth := getEnvBoolDefault("MCP_REQUIRE_AUTH", false)
+	if mode != "stdio" && requireAuth && authToken == "" {
+		log.Println("Error: MCP_REQUIRE_AUTH=true requires MCP_AUTH_TOKEN to be set")
+		os.Exit(1)
+	}
 
 	// Validate flag combinations
 	if noK8s && noHelm {
@@ -117,6 +186,21 @@ func main() {
 	}
 	if noAgent {
 		log.Println("DevOps agent disabled")
+	}
+	if mode != "stdio" && authToken == "" {
+		log.Println("Warning: HTTP MCP auth is disabled; set MCP_AUTH_TOKEN or MCP_REQUIRE_AUTH=true for shared environments")
+	}
+	if !readOnly {
+		log.Println("Write-capable mode enabled")
+		if !enableExec {
+			log.Println("execInPod disabled; set --enable-exec or MCP_ENABLE_EXEC=true to expose it")
+		}
+		if !enableKubectl {
+			log.Println("runKubectlCommand disabled; set --enable-kubectl or MCP_ENABLE_KUBECTL=true to expose it")
+		}
+		if !enableAgentWrite {
+			log.Println("DevOps agent write mode disabled; set --enable-agent-write or MCP_ENABLE_AGENT_WRITE=true to allow it")
+		}
 	}
 
 	// Create MCP server
@@ -154,88 +238,91 @@ func main() {
 
 	// Register Kubernetes tools
 	if !noK8s {
-		s.AddTool(tools.GetAPIResourcesTool(), handlers.GetAPIResources(client))
-		s.AddTool(tools.ListResourcesTool(), handlers.ListResources(client))
-		s.AddTool(tools.GetResourcesTool(), handlers.GetResources(client))
-		s.AddTool(tools.DescribeResourcesTool(), handlers.DescribeResources(client))
-		s.AddTool(tools.GetPodsLogsTools(), handlers.GetPodsLogs(client))
-		s.AddTool(tools.GetNodeMetricsTools(), handlers.GetNodeMetrics(client))
-		s.AddTool(tools.GetPodMetricsTool(), handlers.GetPodMetrics(client))
-		s.AddTool(tools.GetEventsTool(), handlers.GetEvents(client))
-		s.AddTool(tools.GetIngressesTool(), handlers.GetIngresses(client))
+		addAuditedTool(s, tools.GetAPIResourcesTool(), "read", handlers.GetAPIResources(client))
+		addAuditedTool(s, tools.ListResourcesTool(), "read", handlers.ListResources(client))
+		addAuditedTool(s, tools.GetResourcesTool(), "read", handlers.GetResources(client))
+		addAuditedTool(s, tools.DescribeResourcesTool(), "read", handlers.DescribeResources(client))
+		addAuditedTool(s, tools.GetPodsLogsTools(), "read/logs", handlers.GetPodsLogs(client))
+		addAuditedTool(s, tools.GetNodeMetricsTools(), "read", handlers.GetNodeMetrics(client))
+		addAuditedTool(s, tools.GetPodMetricsTool(), "read", handlers.GetPodMetrics(client))
+		addAuditedTool(s, tools.GetEventsTool(), "read", handlers.GetEvents(client))
+		addAuditedTool(s, tools.GetIngressesTool(), "read", handlers.GetIngresses(client))
 
 		// Enhanced Resource Inspection Tools (Read-Only)
-		s.AddTool(tools.GetResourceYAMLTool(), handlers.GetResourceYAML(client))
-		s.AddTool(tools.GetResourceDiffTool(), handlers.GetResourceDiff(client))
-		s.AddTool(tools.GetNamespaceResourcesTool(), handlers.GetNamespaceResources(client))
-		s.AddTool(tools.GetResourceOwnersTool(), handlers.GetResourceOwners(client))
+		addAuditedTool(s, tools.GetResourceYAMLTool(), "read", handlers.GetResourceYAML(client))
+		addAuditedTool(s, tools.GetResourceDiffTool(), "read", handlers.GetResourceDiff(client))
+		addAuditedTool(s, tools.GetNamespaceResourcesTool(), "read", handlers.GetNamespaceResources(client))
+		addAuditedTool(s, tools.GetResourceOwnersTool(), "read", handlers.GetResourceOwners(client))
 
 		// Advanced Monitoring & Observability Tools (Read-Only)
-		s.AddTool(tools.GetClusterHealthTool(), handlers.GetClusterHealth(client))
-		s.AddTool(tools.GetResourceQuotasTool(), handlers.GetResourceQuotas(client))
-		s.AddTool(tools.GetLimitRangesTool(), handlers.GetLimitRanges(client))
-		s.AddTool(tools.GetTopPodsTool(), handlers.GetTopPods(client))
-		s.AddTool(tools.GetTopNodesTool(), handlers.GetTopNodes(client))
+		addAuditedTool(s, tools.GetClusterHealthTool(), "read", handlers.GetClusterHealth(client))
+		addAuditedTool(s, tools.GetResourceQuotasTool(), "read", handlers.GetResourceQuotas(client))
+		addAuditedTool(s, tools.GetLimitRangesTool(), "read", handlers.GetLimitRanges(client))
+		addAuditedTool(s, tools.GetTopPodsTool(), "read", handlers.GetTopPods(client))
+		addAuditedTool(s, tools.GetTopNodesTool(), "read", handlers.GetTopNodes(client))
 
 		// Debugging & Troubleshooting Tools (Read-Only)
-		s.AddTool(tools.GetPodDebugInfoTool(), handlers.GetPodDebugInfo(client))
-		s.AddTool(tools.GetServiceEndpointsTool(), handlers.GetServiceEndpoints(client))
-		s.AddTool(tools.GetNetworkPoliciesTool(), handlers.GetNetworkPolicies(client))
-		s.AddTool(tools.GetSecurityContextTool(), handlers.GetSecurityContext(client))
-		s.AddTool(tools.GetResourceHistoryTool(), handlers.GetResourceHistory(client))
-		s.AddTool(tools.ValidateManifestTool(), handlers.ValidateManifest(client))
+		addAuditedTool(s, tools.GetPodDebugInfoTool(), "read/logs", handlers.GetPodDebugInfo(client))
+		addAuditedTool(s, tools.GetServiceEndpointsTool(), "read", handlers.GetServiceEndpoints(client))
+		addAuditedTool(s, tools.GetNetworkPoliciesTool(), "read", handlers.GetNetworkPolicies(client))
+		addAuditedTool(s, tools.GetSecurityContextTool(), "read", handlers.GetSecurityContext(client))
+		addAuditedTool(s, tools.GetResourceHistoryTool(), "read", handlers.GetResourceHistory(client))
+		addAuditedTool(s, tools.ValidateManifestTool(), "read/validation", handlers.ValidateManifest(client))
 
 		// Cluster Overview (Read-Only)
-		s.AddTool(tools.GetClusterSummaryTool(), handlers.GetClusterSummary(client))
+		addAuditedTool(s, tools.GetClusterSummaryTool(), "read", handlers.GetClusterSummary(client))
 
 		// GPU Debugging & Troubleshooting (Read-Only)
-		s.AddTool(tools.GetGPUClusterOverviewTool(), handlers.GetGPUClusterOverview(client))
-		s.AddTool(tools.DiagnoseGPUSchedulingTool(), handlers.DiagnoseGPUScheduling(client))
-		s.AddTool(tools.GetGPUOperatorHealthTool(), handlers.GetGPUOperatorHealth(client))
+		addAuditedTool(s, tools.GetGPUClusterOverviewTool(), "read", handlers.GetGPUClusterOverview(client))
+		addAuditedTool(s, tools.DiagnoseGPUSchedulingTool(), "read", handlers.DiagnoseGPUScheduling(client))
+		addAuditedTool(s, tools.GetGPUOperatorHealthTool(), "read/logs", handlers.GetGPUOperatorHealth(client))
 
 		// Namespace & cluster navigation (Read-Only)
-		s.AddTool(tools.ListNamespacesTool(), handlers.ListNamespaces(client))
-		s.AddTool(tools.GetRolloutStatusTool(), handlers.GetRolloutStatus(client))
-		s.AddTool(tools.ListContextsTool(), handlers.ListContexts(client))
+		addAuditedTool(s, tools.ListNamespacesTool(), "read", handlers.ListNamespaces(client))
+		addAuditedTool(s, tools.GetRolloutStatusTool(), "read", handlers.GetRolloutStatus(client))
+		addAuditedTool(s, tools.ListContextsTool(), "read", handlers.ListContexts(client))
 
 		if !readOnly {
-			s.AddTool(tools.CreateOrUpdateResourceJSONTool(), handlers.CreateOrUpdateResourceJSON(client))
-			s.AddTool(tools.CreateOrUpdateResourceYAMLTool(), handlers.CreateOrUpdateResourceYAML(client))
-			s.AddTool(tools.DeleteResourceTool(), handlers.DeleteResource(client))
-			s.AddTool(tools.RolloutRestartTool(), handlers.RolloutRestart(client))
-			s.AddTool(tools.ExecInPodTool(), handlers.ExecInPod(client))
-			s.AddTool(tools.ScaleResourceTool(), handlers.ScaleResource(client))
-			s.AddTool(tools.SwitchContextTool(), handlers.SwitchContext(client))
+			addAuditedTool(s, tools.CreateOrUpdateResourceJSONTool(), "write", handlers.CreateOrUpdateResourceJSON(client))
+			addAuditedTool(s, tools.CreateOrUpdateResourceYAMLTool(), "write", handlers.CreateOrUpdateResourceYAML(client))
+			addAuditedTool(s, tools.DeleteResourceTool(), "write/destructive", handlers.DeleteResource(client))
+			addAuditedTool(s, tools.RolloutRestartTool(), "write", handlers.RolloutRestart(client))
+			addAuditedTool(s, tools.ScaleResourceTool(), "write", handlers.ScaleResource(client))
 
 			// GPU Remediation (Write)
-			s.AddTool(tools.RemediateGPUIssueTool(), handlers.RemediateGPUIssue(client))
+			addAuditedTool(s, tools.RemediateGPUIssueTool(), "write", handlers.RemediateGPUIssue(client))
 
-			// Kubectl Command (Write)
-			s.AddTool(tools.RunKubectlCommandTool(), handlers.RunKubectlCommand(client))
+			if enableExec {
+				addAuditedTool(s, tools.ExecInPodTool(), "exec", handlers.ExecInPod(client))
+			}
 
+			if enableKubectl {
+				addAuditedTool(s, tools.RunKubectlCommandTool(), "kubectl", handlers.RunKubectlCommand(client))
+			}
 		}
 
 		// DevOps Agent (requires opencode CLI and env vars). In parent
-		// read-only mode the handler forces inspection-only child runs.
+		// read-only mode, or without explicit agent-write capability, the
+		// handler forces inspection-only child runs.
 		if agentClient != nil {
-			s.AddTool(tools.DevopsAgentTool(), handlers.DevopsAgent(agentClient, readOnly))
+			addAuditedTool(s, tools.DevopsAgentTool(), "agent", handlers.DevopsAgent(agentClient, readOnly || !enableAgentWrite))
 		}
 	}
 
 	// Register Helm tools
 	if !noHelm {
-		s.AddTool(tools.HelmListTool(), handlers.HelmList(helmClient))
-		s.AddTool(tools.HelmGetTool(), handlers.HelmGet(helmClient))
-		s.AddTool(tools.HelmHistoryTool(), handlers.HelmHistory(helmClient))
-		s.AddTool(tools.HelmRepoListTool(), handlers.HelmRepoList(helmClient))
+		addAuditedTool(s, tools.HelmListTool(), "read", handlers.HelmList(helmClient))
+		addAuditedTool(s, tools.HelmGetTool(), "read", handlers.HelmGet(helmClient))
+		addAuditedTool(s, tools.HelmHistoryTool(), "read", handlers.HelmHistory(helmClient))
+		addAuditedTool(s, tools.HelmRepoListTool(), "read", handlers.HelmRepoList(helmClient))
 
 		// Register write operations only if not in read-only mode
 		if !readOnly {
-			s.AddTool(tools.HelmInstallTool(), handlers.HelmInstall(helmClient))
-			s.AddTool(tools.HelmUpgradeTool(), handlers.HelmUpgrade(helmClient))
-			s.AddTool(tools.HelmUninstallTool(), handlers.HelmUninstall(helmClient))
-			s.AddTool(tools.HelmRollbackTool(), handlers.HelmRollback(helmClient))
-			s.AddTool(tools.HelmRepoAddTool(), handlers.HelmRepoAdd(helmClient))
+			addAuditedTool(s, tools.HelmInstallTool(), "write", handlers.HelmInstall(helmClient))
+			addAuditedTool(s, tools.HelmUpgradeTool(), "write", handlers.HelmUpgrade(helmClient))
+			addAuditedTool(s, tools.HelmUninstallTool(), "write/destructive", handlers.HelmUninstall(helmClient))
+			addAuditedTool(s, tools.HelmRollbackTool(), "write", handlers.HelmRollback(helmClient))
+			addAuditedTool(s, tools.HelmRepoAddTool(), "write", handlers.HelmRepoAdd(helmClient))
 		}
 	}
 
@@ -271,7 +358,7 @@ func main() {
 			sse.ServeHTTP(w, r)
 		})
 
-		httpServer.Handler = loggingMiddleware(baseHandler)
+		httpServer.Handler = loggingMiddleware(authMiddleware(baseHandler, authToken))
 
 		go func() {
 			if err := sse.Start(":" + port); err != nil && err != http.ErrServerClosed {
@@ -310,7 +397,7 @@ func main() {
 			streamableHTTP.ServeHTTP(w, r)
 		})
 
-		httpServer.Handler = loggingMiddleware(baseHandler)
+		httpServer.Handler = loggingMiddleware(authMiddleware(baseHandler, authToken))
 
 		go func() {
 			if err := streamableHTTP.Start(":" + port); err != nil && err != http.ErrServerClosed {
@@ -341,6 +428,22 @@ func getEnvOrDefault(key, defaultValue string) string {
 		return value
 	}
 	return defaultValue
+}
+
+func getEnvBoolDefault(key string, defaultValue bool) bool {
+	value, exists := os.LookupEnv(key)
+	if !exists {
+		return defaultValue
+	}
+	switch strings.ToLower(strings.TrimSpace(value)) {
+	case "1", "true", "t", "yes", "y", "on":
+		return true
+	case "0", "false", "f", "no", "n", "off":
+		return false
+	default:
+		log.Printf("Warning: invalid boolean value for %s=%q; using default %v", key, value, defaultValue)
+		return defaultValue
+	}
 }
 
 // handleHealth verifies K8s API connectivity and returns 200 if healthy.

@@ -1,6 +1,7 @@
 package handlers
 
 import (
+	"strings"
 	"testing"
 )
 
@@ -96,4 +97,24 @@ func TestGetRequiredStringArg(t *testing.T) {
 			t.Fatal("expected error for wrong type")
 		}
 	})
+}
+
+func TestMarshalSafeRedactsSensitiveStructuredOutput(t *testing.T) {
+	payload := map[string]interface{}{
+		"manifest": "apiVersion: v1\nkind: Secret\ndata:\n  password: c2VjcmV0\n",
+		"config": map[string]interface{}{
+			"password": "short-secret",
+		},
+	}
+
+	data, err := marshalSafe(payload)
+	if err != nil {
+		t.Fatalf("marshalSafe failed: %v", err)
+	}
+	output := string(data)
+	for _, leaked := range []string{"c2VjcmV0", "short-secret"} {
+		if strings.Contains(output, leaked) {
+			t.Fatalf("sensitive value %q leaked in %s", leaked, output)
+		}
+	}
 }

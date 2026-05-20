@@ -42,16 +42,19 @@ mcp_tool_names:
   - getRolloutStatus
   - listContexts
 
-  # Kubernetes — Write Operations
+  # Kubernetes — Write Operations (server must not be read-only)
   - createResource
   - createResourceYAML
   - deleteResource
   - rolloutRestart
-  - execInPod
   - scaleResource
-  - switchContext
   - remediateGPUIssue
+
+  # Kubernetes — Dangerous Optional Capabilities
+  - execInPod
   - runKubectlCommand
+
+  # Agent
   - devopsAgent
 
   # Helm — Read-Only

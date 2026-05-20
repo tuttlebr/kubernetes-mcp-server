@@ -9,12 +9,12 @@ func DevopsAgentTool() mcp.Tool {
 	return mcp.NewTool(
 		"devopsAgent",
 		mcp.WithDescription("Launch an autonomous DevOps agent for Kubernetes cluster management. "+
-			"The agent can install, upgrade, debug, and manage workloads using the full suite of k8s and Helm MCP tools. "+
+			"The agent can inspect, debug, and, when explicitly permitted, manage workloads using k8s and Helm MCP tools. "+
 			"It runs headlessly via opencode, connecting to a child k8s-mcp-server instance for cluster access. "+
 			"Provide a natural language description of what you need — the agent will autonomously execute the required operations "+
 			"and produce a structured report. "+
 			"Requires: opencode CLI installed, OPENCODE_BASE_URL, OPENCODE_API_KEY, and OPENCODE_MODEL env vars set. "+
-			"When the parent MCP server runs in read-only mode, this tool is forced into inspection-only mode."),
+			"When the parent MCP server runs in read-only mode or agent-write capability is disabled, this tool is forced into inspection-only mode."),
 		mcp.WithString("prompt", mcp.Required(),
 			mcp.Description("Natural language description of the Kubernetes task to perform. "+
 				"Be specific: include resource names, namespaces, chart names, or error messages. "+
@@ -37,8 +37,7 @@ func DevopsAgentTool() mcp.Tool {
 		mcp.WithBoolean("readOnly",
 			mcp.Description("When true, the child k8s-mcp-server runs in read-only mode, "+
 				"preventing the agent from making any cluster changes. "+
-				"Defaults to false, allowing the agent to perform management and remediation actions. "+
-				"Set to true for inspection-only runs. Parent server read-only mode always overrides this to true."),
+				"Defaults to false, but parent server read-only mode and disabled agent-write capability always override this to true."),
 			mcp.DefaultBool(false)),
 	)
 }

@@ -31,7 +31,7 @@ docker:
 	docker compose build
 
 deploy:
-	./redeploy.sh
+	./deploy.sh
 
 clean:
 	rm -f $(SRC_DIR)/$(BINARY)

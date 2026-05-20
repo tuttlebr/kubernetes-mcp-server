@@ -235,11 +235,59 @@ func TestSanitizeText_InlineBase64(t *testing.T) {
 	if strings.Contains(result, blob) {
 		t.Error("inline base64 blob was not replaced")
 	}
-	if !strings.Contains(result, "BASE64_DATA") {
+	if !strings.Contains(result, "[REDACTED") && !strings.Contains(result, "BASE64_DATA") {
 		t.Error("placeholder was not inserted")
 	}
-	if !strings.Contains(result, "name: test") {
-		t.Error("non-base64 lines were incorrectly modified")
+	if strings.Contains(result, "name: test") {
+		t.Error("Secret data values should be redacted even when not base64")
+	}
+}
+
+func TestSanitizeText_ShortSensitiveAssignments(t *testing.T) {
+	input := "password=short-secret token: abc123 authorization: Bearer xyz"
+	result := SanitizeText(input)
+
+	for _, leaked := range []string{"short-secret", "abc123", "Bearer xyz"} {
+		if strings.Contains(result, leaked) {
+			t.Fatalf("sensitive value %q leaked in %q", leaked, result)
+		}
+	}
+	if strings.Count(result, "[REDACTED]") < 3 {
+		t.Fatalf("expected redaction markers, got %q", result)
+	}
+}
+
+func TestSanitizeText_SecretYAMLBlock(t *testing.T) {
+	input := "apiVersion: v1\nkind: Secret\nmetadata:\n  name: test\ndata:\n  username: YWRtaW4=\n  password: c2VjcmV0\n---\nkind: ConfigMap\ndata:\n  keep: visible\n"
+	result := SanitizeText(input)
+
+	if strings.Contains(result, "YWRtaW4=") || strings.Contains(result, "c2VjcmV0") {
+		t.Fatalf("secret YAML data leaked: %s", result)
+	}
+	if !strings.Contains(result, "keep: visible") {
+		t.Fatalf("non-secret YAML data was unexpectedly redacted: %s", result)
+	}
+}
+
+func TestSanitizeForOutput_KeyAwareRedaction(t *testing.T) {
+	input := map[string]interface{}{
+		"username": "admin",
+		"password": "short-secret",
+		"nested": map[string]interface{}{
+			"apiKey": "abc123",
+		},
+	}
+
+	result := SanitizeForOutput(input).(map[string]interface{})
+	if result["username"] != "admin" {
+		t.Fatalf("non-sensitive username changed: %#v", result["username"])
+	}
+	if result["password"] == "short-secret" {
+		t.Fatal("password was not redacted")
+	}
+	nested := result["nested"].(map[string]interface{})
+	if nested["apiKey"] == "abc123" {
+		t.Fatal("nested apiKey was not redacted")
 	}
 }
 

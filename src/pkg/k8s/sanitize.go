@@ -21,6 +21,10 @@ const base64MinLen = 256
 // padding) and at least base64MinLen long.
 var looksBase64 = regexp.MustCompile(`^[A-Za-z0-9+/\-_\r\n]+=*$`)
 
+var sensitiveAssignmentRe = regexp.MustCompile(`(?i)(\b(?:authorization|password|passwd|pwd|token|api[_-]?key|apikey|access[_-]?key|secret[_-]?key|client[_-]?secret|private[_-]?key|session[_-]?token)\b\s*[:=]\s*)(["']?)[^\s,"']+`)
+var sensitiveJSONRe = regexp.MustCompile(`(?i)("(?:authorization|password|passwd|pwd|token|api[_-]?key|apikey|access[_-]?key|secret[_-]?key|client[_-]?secret|private[_-]?key|session[_-]?token)"\s*:\s*")([^"]*)(")`)
+var authorizationLineRe = regexp.MustCompile(`(?im)(\bauthorization\b\s*[:=]\s*).+$`)
+
 // SanitizeResource redacts sensitive and bloated fields from a Kubernetes
 // resource represented as unstructured content.  It:
 //   - Replaces all values in Secret `data` and `stringData` fields with [REDACTED]
@@ -68,6 +72,50 @@ func SanitizeResource(content map[string]interface{}) map[string]interface{} {
 	deepSanitizeBase64(content)
 
 	return content
+}
+
+// SanitizeForOutput recursively redacts sensitive values from arbitrary
+// JSON-like output before it is returned to an agent.
+func SanitizeForOutput(v interface{}) interface{} {
+	return sanitizeValue("", v)
+}
+
+func sanitizeValue(key string, v interface{}) interface{} {
+	switch val := v.(type) {
+	case map[string]interface{}:
+		if kind, _ := val["kind"].(string); kind == "Secret" {
+			SanitizeResource(val)
+		}
+		out := make(map[string]interface{}, len(val))
+		for k, item := range val {
+			out[k] = sanitizeValue(k, item)
+		}
+		return out
+	case []interface{}:
+		out := make([]interface{}, 0, len(val))
+		for _, item := range val {
+			out = append(out, sanitizeValue("", item))
+		}
+		return out
+	case string:
+		if isSensitiveKey(key) {
+			return fmt.Sprintf("[REDACTED %d bytes]", len(val))
+		}
+		return SanitizeText(val)
+	default:
+		return v
+	}
+}
+
+func isSensitiveKey(key string) bool {
+	normalized := strings.ToLower(strings.ReplaceAll(strings.ReplaceAll(key, "_", ""), "-", ""))
+	switch normalized {
+	case "authorization", "password", "passwd", "pwd", "token", "apikey", "accesskey",
+		"secret", "secretkey", "clientsecret", "privatekey", "sessiontoken":
+		return true
+	default:
+		return false
+	}
 }
 
 // redactMapValues replaces all values in content[field] with a redacted placeholder.
@@ -178,11 +226,87 @@ func looksLikeText(s string) bool {
 // blobs and replaces them with placeholders.  It also enforces a maximum
 // output size.
 func SanitizeText(s string) string {
+	s = redactSensitiveText(s)
+	s = redactSecretYAMLBlocks(s)
 	s = replaceInlineBase64(s)
 	if len(s) > maxResponseBytes {
-		s = s[:maxResponseBytes] + fmt.Sprintf("\n[OUTPUT TRUNCATED — %d bytes total, showing first %d]", len(s)+maxResponseBytes, maxResponseBytes)
+		total := len(s)
+		s = s[:maxResponseBytes] + fmt.Sprintf("\n[OUTPUT TRUNCATED - %d bytes total, showing first %d]", total, maxResponseBytes)
 	}
 	return s
+}
+
+func redactSensitiveText(s string) string {
+	s = sensitiveJSONRe.ReplaceAllString(s, `${1}[REDACTED]${3}`)
+	s = authorizationLineRe.ReplaceAllString(s, `${1}[REDACTED]`)
+	return sensitiveAssignmentRe.ReplaceAllString(s, `${1}${2}[REDACTED]`)
+}
+
+func redactSecretYAMLBlocks(s string) string {
+	lines := strings.SplitAfter(s, "\n")
+	inSecretDoc := false
+	inSecretData := false
+	dataIndent := 0
+
+	for i, line := range lines {
+		trimmed := strings.TrimSpace(strings.TrimSuffix(line, "\n"))
+		if trimmed == "---" {
+			inSecretDoc = false
+			inSecretData = false
+			continue
+		}
+		if trimmed == "kind: Secret" {
+			inSecretDoc = true
+			continue
+		}
+		if !inSecretDoc {
+			continue
+		}
+
+		indent := leadingSpaces(line)
+		if inSecretData && trimmed != "" && indent <= dataIndent {
+			inSecretData = false
+		}
+		if trimmed == "data:" || trimmed == "stringData:" {
+			inSecretData = true
+			dataIndent = indent
+			continue
+		}
+		if inSecretData {
+			lines[i] = redactYAMLValueLine(line)
+		}
+	}
+
+	return strings.Join(lines, "")
+}
+
+func leadingSpaces(s string) int {
+	count := 0
+	for _, r := range s {
+		if r != ' ' {
+			break
+		}
+		count++
+	}
+	return count
+}
+
+func redactYAMLValueLine(line string) string {
+	newline := ""
+	if strings.HasSuffix(line, "\n") {
+		newline = "\n"
+		line = strings.TrimSuffix(line, "\n")
+	}
+	idx := strings.Index(line, ":")
+	if idx < 0 {
+		return line + newline
+	}
+	prefix := line[:idx+1]
+	value := strings.TrimSpace(line[idx+1:])
+	if value == "" {
+		return line + newline
+	}
+	return prefix + fmt.Sprintf(" [REDACTED %d bytes]", len(value)) + newline
 }
 
 // replaceInlineBase64 finds long runs of base64 characters in text output

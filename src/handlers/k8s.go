@@ -18,6 +18,15 @@ func marshalSafe(v interface{}) ([]byte, error) {
 	if err != nil {
 		return nil, err
 	}
+
+	var decoded interface{}
+	if err := json.Unmarshal(data, &decoded); err == nil {
+		data, err = json.Marshal(k8s.SanitizeForOutput(decoded))
+		if err != nil {
+			return nil, err
+		}
+	}
+
 	return k8s.TruncateJSON(data), nil
 }
 
@@ -244,8 +253,8 @@ func GetPodsLogs(client *k8s.Client) func(ctx context.Context, request mcp.CallT
 			return nil, fmt.Errorf("failed to get logs for pod '%s': %w", name, err)
 		}
 
-		// Return logs as plain text instead of JSON for better readability
-		return mcp.NewToolResultText(logs), nil
+		// Return logs as plain text instead of JSON for better readability.
+		return mcp.NewToolResultText(k8s.SanitizeText(logs)), nil
 	}
 }
 
@@ -521,7 +530,7 @@ func GetResourceYAML(client *k8s.Client) func(ctx context.Context, request mcp.C
 			return nil, fmt.Errorf("failed to get resource YAML: %w", err)
 		}
 
-		return mcp.NewToolResultText(yamlContent), nil
+		return mcp.NewToolResultText(k8s.SanitizeText(yamlContent)), nil
 	}
 }
 

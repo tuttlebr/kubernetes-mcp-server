@@ -143,8 +143,15 @@ spec:
               value: "streamable-http"
             - name: SERVER_PORT
               value: "8080"
-            - name: KUBECONFIG
-              value: "/home/appuser/.kube/config"
+            - name: SERVER_READ_ONLY
+              value: "true"
+            - name: MCP_REQUIRE_AUTH
+              value: "true"
+            - name: MCP_AUTH_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: k8s-mcp-auth
+                  key: token
             # DevOps agent (optional — omit to disable devopsAgent tool)
             - name: OPENCODE_BASE_URL
               valueFrom:
@@ -172,9 +179,6 @@ spec:
               memory: "16Gi"
               cpu: "8"
           volumeMounts:
-            - name: kubeconfig
-              mountPath: /home/appuser/.kube
-              readOnly: true
             - name: tmp
               mountPath: /tmp
             - name: helm-cache
@@ -208,9 +212,6 @@ spec:
               drop:
                 - ALL
       volumes:
-        - name: kubeconfig
-          secret:
-            secretName: k8s-mcp-kubeconfig
         - name: tmp
           emptyDir: {}
         - name: helm-cache
