@@ -230,9 +230,9 @@ Every registered tool goes through the audited registration wrapper in `main.go`
 
 ### Build Reproducibility
 
-- The release Docker image no longer copies gitignored local `src/skills/` into the image.
-- `src/.dockerignore` excludes local build output, local skills, embedded `.git`, and `.DS_Store`.
-- Production skills should be mounted at runtime or added by a reviewed image layer.
+- The release Docker image bakes a curated DevOps-engineer skill set under `src/skills/` into `/home/appuser/.config/opencode/skills/`. The set is scoped to Kubernetes monitoring/remediation, shell scripting, and Python/Rust code work; see [Agent Skills](#agent-skills) for the full list.
+- `src/.dockerignore` excludes build output, embedded `.git`, and `.DS_Store`. The `src/skills/` tree is intentionally not excluded so that the audited skill set ships with the image.
+- Per-user or experimental skills can still be supplied without rebuilding by volume-mounting over `/home/appuser/.config/opencode/skills/` at runtime.
 
 ### Review Artifacts
 
@@ -301,6 +301,20 @@ docker compose up
 
 [OpenCode skills](https://opencode.ai/docs/skills) are reusable instruction sets that extend the agent's behavior for specific domains — e.g., how to triage GPU workloads, how to interpret your team's alerting conventions, or domain-specific runbooks.
 
+### Bundled Skill Set
+
+The Docker image ships with a curated set of skills scoped to a DevOps-engineer workload: Kubernetes cluster monitoring and remediation, shell scripting, Python/Rust code work, and the NVIDIA NIM/RAG stack this server is typically deployed alongside. The bundled set covers:
+
+- **Core DevOps / SRE** — `devops-engineer`, `kubernetes-specialist`, `sre-engineer`, `monitoring-expert`, `chaos-engineer`, `terraform-engineer`, `mcp-developer`
+- **Languages** — `python-pro`, `rust-engineer`, `golang-pro`
+- **Debugging / quality** — `debugging-wizard`, `code-reviewer`, `code-documenter`, `test-master`, `cli-developer`, `the-fool`
+- **Security** — `secure-code-guardian`, `security-best-practices`, `security-reviewer`, `security-threat-model`
+- **Data / RAG** — `database-optimizer`, `postgres-pro`, `sql-pro`, `pandas-pro`, `ml-pipeline`, `rag-architect`, `jupyter-notebook`, `prompt-engineer`
+- **NVIDIA stack** — `nat-*` (NeMo Agent Toolkit: agent configuration, evaluation, installation, MCP+serving, optimization, path-checks, telemetry, tools/functions, user-rules, workflow-creation), `nvcf-ngc-cli-skill`, `nvcf-self-managed-cli`, `nvcf-self-managed-installation`, `nv-html`
+- **Workflow / meta** — `gh-address-comments`, `gh-fix-ci`, `define-goal`, `skill-creator`, `skill-evolution`
+
+The runtime image installs the toolchain those skills assume — `git`, `github-cli`, `python3`, `py3-yaml`, and `jq` — alongside the existing `helm`, `kubectl`, `bash`, and `curl`. Skill helper scripts (e.g., `skill-creator/scripts/quick_validate.py`, `gh-fix-ci/scripts/inspect_pr_checks.py`) run directly in the container without extra setup.
+
 ### Adding Skills
 
 Each skill lives in its own subdirectory under `src/skills/` and requires a `SKILL.md` file with YAML frontmatter:
@@ -336,9 +350,9 @@ The `name` must match its parent directory name exactly and follow the pattern `
 
 ### How Skills Are Loaded
 
-**Docker / Kubernetes:** The standard image does not copy gitignored local `src/skills/` into the container. This keeps production images reproducible and prevents unreviewed local agent instructions from being baked into releases. For production, either mount an audited skills directory at runtime or build a separate reviewed image layer that adds approved skills.
+**Docker / Kubernetes:** The standard image bakes the curated skill set under `src/skills/` into `/home/appuser/.config/opencode/skills/` during build. The set is audited, scoped to the DevOps-engineer role, and ships with the runtime tools each skill assumes (see [Bundled Skill Set](#bundled-skill-set)). To replace or extend the baked set without rebuilding, mount over the same container path at runtime.
 
-**Runtime mount (no rebuild required):** Mount a local skills directory over the container path:
+**Runtime mount (no rebuild required):** Override or supplement the bundled skills by volume-mounting on top of the container path:
 
 ```yaml
 # docker-compose.yaml
@@ -542,7 +556,7 @@ The Docker image runs with a minimal attack surface:
 - **Non-root user** (`appuser`, UID 1001)
 - **Read-only root filesystem**
 - **All capabilities dropped**
-- **Minimal base image** (Alpine with Helm, kubectl, opencode runtime dependencies, and health-check utilities)
+- **Minimal base image** — Alpine 3.21 with `helm` v3.17.3 (SHA256-pinned), `kubectl` v1.34.1 (SHA256-pinned), the opencode/Bun runtime, and the DevOps-skill toolchain (`git`, `github-cli`, `python3`, `py3-yaml`, `jq`, `bash`, `curl`)
 - **No privilege escalation** allowed
 
 ### Read-Only Mode

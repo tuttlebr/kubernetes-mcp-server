@@ -18,7 +18,7 @@ Current local verification passed:
 3. `execInPod`, `runKubectlCommand`, and agent write mode require explicit capability gates.
 4. Process-global `switchContext` is no longer registered.
 5. Create/update paths now use server-side apply and YAML kind inference.
-6. Docker images no longer bake gitignored local skills into the release image.
+6. The release image now bakes a curated, audited DevOps-engineer skill set (Kubernetes, SRE, debugging, Python/Rust, NVIDIA NIM stack) plus the runtime toolchain those skills assume (`git`, `github-cli`, `python3`, `py3-yaml`, `jq`); deployments can still override via a runtime volume mount on `/home/appuser/.config/opencode/skills`.
 
 ## Decision
 

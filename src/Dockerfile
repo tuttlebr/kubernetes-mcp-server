@@ -35,8 +35,23 @@ RUN bun install -g opencode-ai
 FROM alpine:3.21
 
 # Install ca-certificates, curl for health checks, tzdata for timezone,
-# and gcompat + libstdc++ for Bun/opencode runtime
-RUN apk --no-cache add ca-certificates curl tzdata gcompat libstdc++ bash
+# gcompat + libstdc++ for Bun/opencode runtime, plus the toolchain the
+# DevOps-engineer skills assume in their workflows:
+#   - git, github-cli  -> gh-address-comments, gh-fix-ci, security-*, debugging
+#   - python3, py3-yaml -> skill-creator/jupyter-notebook/gh-* helper scripts
+#   - jq               -> shell-script JSON parsing used throughout the skills
+RUN apk --no-cache add \
+        ca-certificates \
+        curl \
+        tzdata \
+        gcompat \
+        libstdc++ \
+        bash \
+        git \
+        github-cli \
+        python3 \
+        py3-yaml \
+        jq
 
 # Install Helm for cluster management (with checksum verification)
 ARG TARGETARCH
@@ -88,6 +103,11 @@ RUN mkdir -p /home/appuser/.config/opencode/skills \
     /home/appuser/.local/share/opencode \
     /home/appuser/.cache/opencode && \
     chown -R appuser:appgroup /home/appuser/.config /home/appuser/.local /home/appuser/.cache
+
+# Copy the bundled DevOps-engineer skills. Each skill's contents (SKILL.md,
+# references/, scripts/, assets/) get placed under .../skills/<name>/.
+# Skills can be overridden at runtime by volume-mounting over this path.
+COPY --chown=appuser:appgroup skills/ /home/appuser/.config/opencode/skills/
 
 # Switch to non-root user
 USER appuser

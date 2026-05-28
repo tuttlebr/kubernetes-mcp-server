@@ -12,7 +12,7 @@ This is a Go MCP server for Kubernetes and Helm. The Go module is rooted in `src
 - `deploy/`, `docker-compose.yaml`, `deploy.sh`: deployment and local runtime assets. `redeploy.sh` is a compatibility wrapper.
 - `mcp-functions.yaml`, `mcp-tool-names.yaml`, `src/mcp-config.json`: MCP metadata.
 
-`src/skills/*/` is gitignored for user-local OpenCode agent skills.
+`src/skills/*/` is gitignored, but the Docker image bakes whatever skill directories are present in `src/skills/` at build time into the runtime at `/home/appuser/.config/opencode/skills/`. The shipping set is curated for a DevOps-engineer scope (Kubernetes monitoring/remediation, shell scripting, Python/Rust); see the README's Bundled Skill Set section for the canonical list. Contributors can add or replace skills locally without committing them, and runtime deployments can override via a volume mount on that container path.
 
 ## Build, Test, and Development Commands
 

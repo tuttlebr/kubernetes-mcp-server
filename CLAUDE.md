@@ -77,11 +77,11 @@ The `--read-only` flag does not check at request time — it controls whether wr
 
 ## Skills
 
-OpenCode skills live under `src/skills/<name>/SKILL.md` and are copied into the Docker image at `/home/appuser/.config/opencode/skills/` during build (Dockerfile stage 3). Skills can be hot-mounted by volume-mounting over that path. Per `.gitignore`, `src/skills/*/` subdirectories are ignored — only the directory scaffolding is tracked; concrete skills are user-local.
+OpenCode skills live under `src/skills/<name>/SKILL.md` and are copied into the Docker image at `/home/appuser/.config/opencode/skills/` during build (stage 3, final `COPY skills/`). The bundled set is curated for a DevOps-engineer scope (Kubernetes monitoring/remediation, shell scripts, Python/Rust code work, NVIDIA NIM/RAG stack) — see the README's Bundled Skill Set table for the canonical list. Skills can be overridden at runtime by volume-mounting over that path. Per `.gitignore`, `src/skills/*/` subdirectories are still ignored so individual contributors can add or replace skills locally without committing them; the audited set that ships in the image is established by the build host's working tree.
 
 ## Docker
 
-The Dockerfile is a three-stage build: Go binary → opencode (via Bun) → Alpine runtime with helm v3.17.3 and kubectl v1.34.1 installed (both with SHA256 verification). The runtime image runs as UID 1001 (`appuser`), drops all capabilities, and uses a read-only root filesystem when deployed via `deploy/k8s-mcp-server.yaml`. `deploy.sh` builds + pushes the image, applies the manifest, syncs the kubeconfig secret (and optionally the agent-config secret from `.env`), then restarts the DaemonSet.
+The Dockerfile is a three-stage build: Go binary → opencode (via Bun) → Alpine 3.21 runtime. The runtime stage installs `helm` v3.17.3 and `kubectl` v1.34.1 (both SHA256-verified) plus the toolchain the bundled skills assume — `git`, `github-cli`, `python3`, `py3-yaml`, and `jq` — alongside `bash`, `curl`, `ca-certificates`, `tzdata`, `gcompat`, and `libstdc++`. Skill helper scripts (`skill-creator/scripts/quick_validate.py`, `gh-*/scripts/*.py`, `jupyter-notebook/scripts/new_notebook.py`) run in the container without further setup. The runtime image runs as UID 1001 (`appuser`), drops all capabilities, and uses a read-only root filesystem when deployed via `deploy/k8s-mcp-server.yaml`. `deploy.sh` builds + pushes the image, applies the manifest, syncs the kubeconfig secret (and optionally the agent-config secret from `.env`), then restarts the DaemonSet.
 
 ## Key Dependencies
 
